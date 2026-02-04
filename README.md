@@ -83,23 +83,26 @@ MIT License - [yamapan](https://github.com/aktsmm)
 This extension respects user privacy.
 
 ### Data Collection
+
 - **Personal Information**: Not collected
 - **External Transmission**: Page content is only sent to local VS Code extension (localhost)
 - **Data Storage**: Only user settings are stored in local storage
 - **Third Party Sharing**: None
 
 ### Permission Usage
-| Permission | Purpose |
-|------------|---------|
-| activeTab | Get current page content |
-| tabs | Get tab info (URL, title) |
-| scripting | Analyze page DOM elements |
-| storage | Save user settings |
-| sidePanel | Display chat UI |
-| tabCapture | Capture screenshots |
-| host_permissions | Work on any web page |
+
+| Permission       | Purpose                   |
+| ---------------- | ------------------------- |
+| activeTab        | Get current page content  |
+| tabs             | Get tab info (URL, title) |
+| scripting        | Analyze page DOM elements |
+| storage          | Save user settings        |
+| sidePanel        | Display chat UI           |
+| tabCapture       | Capture screenshots       |
+| host_permissions | Work on any web page      |
 
 ### LLM Data Transmission
+
 - **GitHub Copilot**: Page content is sent to GitHub/OpenAI servers
 - **Local LLM**: All data is processed locally, nothing sent externally
 
