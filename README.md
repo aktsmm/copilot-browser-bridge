@@ -4,107 +4,109 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub](https://img.shields.io/github/stars/aktsmm/copilot-browser-bridge?style=social)](https://github.com/aktsmm/copilot-browser-bridge)
 
-🌐 ブラウザのページ内容をLLM（GitHub Copilot / ローカルLLM）で解析・対話・自動操作するChrome拡張機能
+Chrome extension to analyze, interact, and automate browser pages with LLM (GitHub Copilot / Local LLM)
 
-## ✨ 特徴
+[Japanese / 日本語版はこちら](README_ja.md)
 
-- **ページ解析**: 現在表示中のWebページをLLMが理解し、質問に回答
-- **ブラウザ自動操作**: クリック、入力、スクロールなどをLLMが自動実行
-- **3つの動作モード**:
-  - 📝 **テキストモード**: DOM解析ベース（高速・軽量）
-  - 📸 **スクリーンショットモード**: Vision APIで視覚的理解
-  - 🔄 **ハイブリッドモード**: テキスト優先、失敗時スクリーンショット
-- **Playwright互換アクション**: ダブルクリック、右クリック、フォーム一括入力など
+## Features
 
-## 🚀 インストール
+- **Page Analysis**: LLM understands the current web page and answers questions
+- **Browser Automation**: LLM automatically performs clicks, inputs, scrolls, etc.
+- **3 Operation Modes**:
+  - Text Mode: DOM analysis-based (fast & lightweight)
+  - Screenshot Mode: Visual understanding via Vision API
+  - Hybrid Mode: Text-first, screenshot fallback
+- **Playwright-compatible Actions**: Double-click, right-click, form fill, etc.
 
-### 開発版（ローカルインストール）
+## Installation
 
-1. このリポジトリをクローン
-2. `npm install` で依存関係をインストール
-3. `npm run build` でビルド
-4. `chrome://extensions` を開く
-5. 「デベロッパーモード」を有効化
-6. 「パッケージ化されていない拡張機能を読み込む」→ `.output/chrome-mv3` フォルダを選択
+### Development Version (Local Install)
 
-### Chrome Web Store（準備中）
+1. Clone this repository
+2. Run `npm install` to install dependencies
+3. Run `npm run build` to build
+4. Open `chrome://extensions`
+5. Enable "Developer mode"
+6. Click "Load unpacked" -> Select `.output/chrome-mv3` folder
 
-Coming soon...
+### Chrome Web Store
 
-## 📋 必要条件
+Under review - Coming soon!
 
-- **VS Code拡張機能**: [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) が必要です
-- **GitHub Copilot** または **ローカルLLM**（LM Studio等）
+## Requirements
 
-## 🎮 使い方
+- **VS Code Extension**: [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) is required
+- **GitHub Copilot** or **Local LLM** (LM Studio, etc.)
 
-1. VS Code拡張機能を起動（自動起動設定可）
-2. Chrome拡張機能のサイドパネルを開く
-3. 任意のWebページで質問や操作指示を入力
+## Usage
 
-### 操作例
+1. Launch VS Code extension (auto-start available)
+2. Open Chrome extension side panel
+3. Enter questions or operation instructions on any web page
+
+### Examples
 
 ```
-「このページの内容を要約して」
-「テストを受けるボタンをクリックして」
-「フォームに名前を入力して送信して」
+"Summarize the content of this page"
+"Click the test button"
+"Fill in the form and submit"
 ```
 
-## ⚙️ 設定
+## Settings
 
-サイドパネルの設定ボタンから以下を設定可能:
+Configure from the side panel settings button:
 
-- **プロバイダー**: Copilot / LM Studio
-- **モデル選択**: claude-sonnet, gpt-4o など
-- **動作モード**: テキスト / スクリーンショット / ハイブリッド
-- **最大ループ数**: 自動操作の最大繰り返し回数
+- **Provider**: Copilot / LM Studio
+- **Model Selection**: claude-sonnet, gpt-4o, etc.
+- **Operation Mode**: Text / Screenshot / Hybrid
+- **Max Loop Count**: Maximum iterations for automation
 
-## 🔧 開発
+## Development
 
 ```bash
-# 開発サーバー起動
+# Start dev server
 npm run dev
 
-# ビルド
+# Build
 npm run build
 
-# ZIP作成（Chrome Web Store用）
+# Create ZIP (for Chrome Web Store)
 npm run zip
 ```
 
-## 📄 ライセンス
+## License
 
-MIT License © [yamapan](https://github.com/aktsmm)
+MIT License - [yamapan](https://github.com/aktsmm)
 
-## � プライバシーポリシー
+## Privacy Policy
 
-この拡張機能は、ユーザーのプライバシーを尊重します。
+This extension respects user privacy.
 
-### データ収集について
-- **個人情報の収集**: 行いません
-- **データの外部送信**: ページ内容はローカルのVS Code拡張機能にのみ送信されます（localhost通信）
-- **データの保存**: ユーザー設定のみローカルストレージに保存します
-- **第三者への提供**: 一切行いません
+### Data Collection
+- **Personal Information**: Not collected
+- **External Transmission**: Page content is only sent to local VS Code extension (localhost)
+- **Data Storage**: Only user settings are stored in local storage
+- **Third Party Sharing**: None
 
-### 権限の使用目的
-| 権限 | 目的 |
-|------|------|
-| activeTab | 現在のページ内容を取得するため |
-| tabs | タブ情報（URL、タイトル）を取得するため |
-| scripting | ページのDOM要素を解析するため |
-| storage | ユーザー設定を保存するため |
-| sidePanel | チャットUIを表示するため |
-| tabCapture | スクリーンショットを取得するため |
-| host_permissions | 任意のWebページで動作するため |
+### Permission Usage
+| Permission | Purpose |
+|------------|---------|
+| activeTab | Get current page content |
+| tabs | Get tab info (URL, title) |
+| scripting | Analyze page DOM elements |
+| storage | Save user settings |
+| sidePanel | Display chat UI |
+| tabCapture | Capture screenshots |
+| host_permissions | Work on any web page |
 
-### LLMへのデータ送信
-- **GitHub Copilot使用時**: ページ内容がGitHub/OpenAIのサーバーに送信されます
-- **ローカルLLM使用時**: すべてのデータはローカルで処理され、外部に送信されません
+### LLM Data Transmission
+- **GitHub Copilot**: Page content is sent to GitHub/OpenAI servers
+- **Local LLM**: All data is processed locally, nothing sent externally
 
-## �🔗 関連プロジェクト
+## Related Projects
 
-- [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) - 必須のVS Code拡張機能
+- [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) - Required VS Code extension
 
-## 👤 Author
+## Author
 
 yamapan (https://github.com/aktsmm)
