@@ -1,0 +1,2231 @@
+import type { BrowserAction, FormField } from "./types";
+
+// Playwright MCP availability flag (kept for future integration)
+let playwrightAvailable = false;
+let preferPlaywright = false;
+
+export function setPlaywrightAvailable(available: boolean) {
+  playwrightAvailable = available;
+}
+
+export function setPreferPlaywright(prefer: boolean) {
+  preferPlaywright = prefer;
+}
+
+export function isPlaywrightPreferred(): boolean {
+  return preferPlaywright && playwrightAvailable;
+}
+
+export async function executeBrowserAction(
+  action: BrowserAction,
+): Promise<string> {
+  try {
+    await ensureClientLoggers();
+    switch (action.type) {
+      case "navigate":
+        return await navigate(action.url);
+      case "click":
+        return await clickElement(
+          action.selector,
+          action.doubleClick,
+          action.button,
+          action.modifiers,
+        );
+      case "type":
+        return await typeText(
+          action.selector,
+          action.text,
+          action.submit,
+          action.slowly,
+        );
+      case "scroll":
+        return await scroll(action.direction, action.amount);
+      case "back":
+        return await goBack();
+      case "forward":
+        return await goForward();
+      case "reload":
+        return await reloadPage();
+      case "newTab":
+        return await openNewTab(action.url);
+      case "closeTab":
+        return await closeCurrentTab();
+      case "screenshot":
+        return await takeScreenshot();
+      case "getHtml":
+        return await getHtml(action.selector);
+      case "waitForSelector":
+        return await waitForSelector(action.selector, action.timeout);
+      case "waitForText":
+        return await waitForText(action.text, action.timeout);
+      case "waitForTextGone":
+        return await waitForTextGone(action.text, action.timeout);
+      // Form actions
+      case "radio":
+        return await selectRadio(action.selector, action.value);
+      case "check":
+        return await checkElement(action.selector, true);
+      case "uncheck":
+        return await checkElement(action.selector, false);
+      case "select":
+        return await selectOption(action.selector, action.value);
+      case "slider":
+        return await setSlider(action.selector, action.value);
+      case "fillForm":
+        return await fillForm(action.fields);
+      case "upload":
+        return await uploadFile(action.selector);
+      // Mouse actions
+      case "drag":
+        return await dragElement(action.startSelector, action.endSelector);
+      case "hover":
+        return await hoverElement(action.selector);
+      case "focus":
+        return await focusElement(action.selector);
+      case "clickXY":
+        return await clickAtCoordinates(action.x, action.y, action.button);
+      // Dialog handling
+      case "handleDialog":
+        return await handleDialog(action.accept, action.promptText);
+      // Keyboard
+      case "pressKey":
+        return await pressKey(action.key);
+      // JavaScript evaluation
+      case "evaluate":
+        return await evaluateScript(action.script, action.selector);
+      // Console & Network
+      case "getConsole":
+        return await getConsoleLogs(action.level);
+      case "getNetwork":
+        return await getNetworkRequests(action.includeStatic);
+      case "playwright":
+        return await executeViaPlaywright(action.action, action.params);
+      default:
+        return `Unknown action type`;
+    }
+  } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+async function getCurrentTab(): Promise<chrome.tabs.Tab> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || !tab.id) throw new Error("No active tab found");
+  return tab;
+}
+
+async function ensureClientLoggers(): Promise<void> {
+  try {
+    const tab = await getCurrentTab();
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id! },
+      func: () => {
+        const w = window as unknown as {
+          __copilotConsolePatched?: boolean;
+          __copilotConsoleLogs?: {
+            level: string;
+            message: string;
+            ts: number;
+          }[];
+          __copilotConsoleOriginals?: Record<
+            string,
+            (...args: unknown[]) => void
+          >;
+          __copilotNetworkPatched?: boolean;
+          __copilotNetworkLogs?: {
+            method: string;
+            url: string;
+            status: number | string;
+            duration: number;
+            ts: number;
+          }[];
+          fetch?: typeof window.fetch;
+        };
+
+        const maxLogs = 200;
+
+        if (!w.__copilotConsolePatched) {
+          w.__copilotConsolePatched = true;
+          w.__copilotConsoleLogs = w.__copilotConsoleLogs || [];
+          w.__copilotConsoleOriginals = {
+            log: console.log.bind(console),
+            info: console.info.bind(console),
+            warn: console.warn.bind(console),
+            error: console.error.bind(console),
+          };
+
+          const push = (level: string, args: unknown[]) => {
+            try {
+              const message = args
+                .map((a) =>
+                  typeof a === "string" ? a : JSON.stringify(a, null, 0),
+                )
+                .join(" ");
+              w.__copilotConsoleLogs!.push({ level, message, ts: Date.now() });
+              if (w.__copilotConsoleLogs!.length > maxLogs) {
+                w.__copilotConsoleLogs!.splice(
+                  0,
+                  w.__copilotConsoleLogs!.length - maxLogs,
+                );
+              }
+            } catch {
+              // ignore
+            }
+          };
+
+          console.log = (...args: unknown[]) => {
+            push("log", args);
+            w.__copilotConsoleOriginals!.log(...args);
+          };
+          console.info = (...args: unknown[]) => {
+            push("info", args);
+            w.__copilotConsoleOriginals!.info(...args);
+          };
+          console.warn = (...args: unknown[]) => {
+            push("warn", args);
+            w.__copilotConsoleOriginals!.warn(...args);
+          };
+          console.error = (...args: unknown[]) => {
+            push("error", args);
+            w.__copilotConsoleOriginals!.error(...args);
+          };
+        }
+
+        if (!w.__copilotNetworkPatched) {
+          w.__copilotNetworkPatched = true;
+          w.__copilotNetworkLogs = w.__copilotNetworkLogs || [];
+
+          const pushNetwork = (
+            method: string,
+            url: string,
+            status: number | string,
+            duration: number,
+          ) => {
+            w.__copilotNetworkLogs!.push({
+              method,
+              url,
+              status,
+              duration,
+              ts: Date.now(),
+            });
+            if (w.__copilotNetworkLogs!.length > maxLogs) {
+              w.__copilotNetworkLogs!.splice(
+                0,
+                w.__copilotNetworkLogs!.length - maxLogs,
+              );
+            }
+          };
+
+          const originalFetch = window.fetch.bind(window);
+          window.fetch = async (...args: Parameters<typeof fetch>) => {
+            const start = Date.now();
+            try {
+              const res = await originalFetch(...args);
+              const input = args[0];
+              const method = (
+                args[1]?.method ||
+                (input instanceof Request && input.method) ||
+                "GET"
+              ).toString();
+              const url =
+                typeof input === "string"
+                  ? input
+                  : input instanceof Request
+                    ? input.url
+                    : "unknown";
+              pushNetwork(method, url, res.status, Date.now() - start);
+              return res;
+            } catch (error) {
+              const input = args[0];
+              const method = (
+                args[1]?.method ||
+                (input instanceof Request && input.method) ||
+                "GET"
+              ).toString();
+              const url =
+                typeof input === "string"
+                  ? input
+                  : input instanceof Request
+                    ? input.url
+                    : "unknown";
+              pushNetwork(method, url, "ERR", Date.now() - start);
+              throw error;
+            }
+          };
+
+          const originalOpen = XMLHttpRequest.prototype.open;
+          const originalSend = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.open = function (
+            this: XMLHttpRequest,
+            method: string,
+            url: string,
+          ) {
+            (
+              this as unknown as {
+                __copilotMethod?: string;
+                __copilotUrl?: string;
+              }
+            ).__copilotMethod = method;
+            (
+              this as unknown as {
+                __copilotMethod?: string;
+                __copilotUrl?: string;
+              }
+            ).__copilotUrl = url;
+            return originalOpen.apply(this, [
+              method,
+              url,
+            ] as unknown as Parameters<typeof originalOpen>);
+          };
+          XMLHttpRequest.prototype.send = function (
+            this: XMLHttpRequest,
+            body?: Document | BodyInit | null,
+          ) {
+            const start = Date.now();
+            this.addEventListener("loadend", () => {
+              const method =
+                (this as unknown as { __copilotMethod?: string })
+                  .__copilotMethod || "GET";
+              const url =
+                (this as unknown as { __copilotUrl?: string }).__copilotUrl ||
+                "unknown";
+              pushNetwork(method, url, this.status, Date.now() - start);
+            });
+            return originalSend.apply(this, [body] as unknown as Parameters<
+              typeof originalSend
+            >);
+          };
+        }
+      },
+    });
+  } catch {
+    // Ignore logger injection errors
+  }
+}
+
+async function navigate(url: string): Promise<string> {
+  const tab = await getCurrentTab();
+  // Ensure URL has protocol
+  const fullUrl = url.startsWith("http") ? url : `https://${url}`;
+  await chrome.tabs.update(tab.id!, { url: fullUrl });
+  return `Navigated to ${fullUrl}`;
+}
+
+async function clickElement(
+  selector: string,
+  doubleClick?: boolean,
+  button?: "left" | "right" | "middle",
+  modifiers?: ("Alt" | "Control" | "Meta" | "Shift")[],
+): Promise<string> {
+  const tab = await getCurrentTab();
+  console.log(
+    `[Click] Attempting to click: "${selector}" double=${doubleClick} button=${button}`,
+  );
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: async (
+      sel: string,
+      dblClick: boolean,
+      btn: string,
+      mods: string[],
+    ) => {
+      console.log(`[Click DOM] Selector received: "${sel}"`);
+
+      // Helper: wait for element to be actionable (like Playwright)
+      const waitForActionable = async (
+        el: HTMLElement,
+        timeout = 3000,
+      ): Promise<boolean> => {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+          const rect = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          const isVisible =
+            rect.width > 0 &&
+            rect.height > 0 &&
+            style.visibility !== "hidden" &&
+            style.display !== "none" &&
+            style.opacity !== "0";
+          const isEnabled = !(el as HTMLInputElement).disabled;
+          if (isVisible && isEnabled) return true;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        return false;
+      };
+
+      // Helper: try multiple click methods (like Playwright)
+      const performClick = async (
+        el: HTMLElement,
+        isDouble: boolean,
+        button: string,
+        modifiers: string[],
+      ): Promise<boolean> => {
+        // Scroll into view
+        el.scrollIntoView({ behavior: "instant", block: "center" });
+        await new Promise((r) => setTimeout(r, 50));
+
+        const rect = el.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+
+        // Determine button number
+        const buttonNum = button === "right" ? 2 : button === "middle" ? 1 : 0;
+
+        // Build event options with modifiers
+        const eventOpts: MouseEventInit = {
+          bubbles: true,
+          cancelable: true,
+          clientX: centerX,
+          clientY: centerY,
+          button: buttonNum,
+          ctrlKey: modifiers.includes("Control"),
+          shiftKey: modifiers.includes("Shift"),
+          altKey: modifiers.includes("Alt"),
+          metaKey: modifiers.includes("Meta"),
+        };
+
+        // Focus first
+        el.focus();
+
+        // For right-click, use contextmenu event
+        if (button === "right") {
+          el.dispatchEvent(new MouseEvent("contextmenu", eventOpts));
+          return true;
+        }
+
+        // Dispatch mouse events
+        el.dispatchEvent(new MouseEvent("mousedown", eventOpts));
+        el.dispatchEvent(new MouseEvent("mouseup", eventOpts));
+        el.dispatchEvent(new MouseEvent("click", eventOpts));
+
+        // Double click
+        if (isDouble) {
+          await new Promise((r) => setTimeout(r, 50));
+          el.dispatchEvent(new MouseEvent("mousedown", eventOpts));
+          el.dispatchEvent(new MouseEvent("mouseup", eventOpts));
+          el.dispatchEvent(new MouseEvent("click", eventOpts));
+          el.dispatchEvent(new MouseEvent("dblclick", eventOpts));
+        }
+
+        // For inputs, dispatch events
+        if (el.tagName === "INPUT") {
+          const input = el as HTMLInputElement;
+          if (input.type === "radio" || input.type === "checkbox") {
+            input.checked = !input.checked;
+          }
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+
+        return true;
+      };
+
+      // Normalize selector - extract ref ID from various formats
+      const normalizedSel = sel.trim();
+
+      // Try to extract eXX pattern from anywhere in the string
+      const refMatch = normalizedSel.match(/[eE](\d+)/);
+      if (refMatch) {
+        const refId = `e${refMatch[1]}`;
+        console.log(`[Click DOM] Extracted ref: ${refId}`);
+
+        // Wait for element with timeout
+        let element: HTMLElement | null = null;
+        const start = Date.now();
+        while (Date.now() - start < 3000) {
+          element = document.querySelector(
+            `[data-copilot-ref="${refId}"]`,
+          ) as HTMLElement;
+          if (element) break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+
+        if (element) {
+          console.log(
+            `[Click DOM] Found element:`,
+            element.tagName,
+            element.textContent?.slice(0, 30),
+          );
+
+          // Wait for actionable
+          const isActionable = await waitForActionable(element);
+          if (!isActionable) {
+            console.warn(`[Click DOM] Element not actionable: ${refId}`);
+          }
+
+          await performClick(element, dblClick, btn, mods);
+          return {
+            success: true,
+            message: `Clicked ${refId}${dblClick ? " (double)" : ""}`,
+          };
+        }
+
+        // Debug: list available refs
+        const allRefs = Array.from(
+          document.querySelectorAll("[data-copilot-ref]"),
+        )
+          .slice(0, 20)
+          .map((el) => {
+            const ref = el.getAttribute("data-copilot-ref");
+            const text = (el as HTMLElement).textContent?.slice(0, 20) || "";
+            return `${ref}:"${text}"`;
+          });
+        console.log(`[Click DOM] Available refs:`, allRefs.join(", "));
+        return { success: false, error: `Element not found: ${refId}` };
+      }
+
+      // Try direct CSS selector
+      let element = document.querySelector(normalizedSel) as HTMLElement;
+
+      // Support Playwright-style :has-text("...") and text="..." selectors
+      if (!element) {
+        const hasTextMatch = normalizedSel.match(
+          /:has-text\(("([^"]+)"|'([^']+)')\)/,
+        );
+        const textMatch = normalizedSel.match(
+          /text\s*=\s*("([^"]+)"|'([^']+)')/,
+        );
+        const textToFind =
+          (hasTextMatch && (hasTextMatch[2] || hasTextMatch[3])) ||
+          (textMatch && (textMatch[2] || textMatch[3])) ||
+          "";
+
+        if (textToFind) {
+          const tag = hasTextMatch
+            ? normalizedSel.split(":has-text")[0].trim()
+            : "";
+          const candidates = Array.from(
+            document.querySelectorAll(tag || "*"),
+          ) as HTMLElement[];
+          for (const el of candidates) {
+            const text =
+              (el as HTMLElement).textContent?.trim() ||
+              el.getAttribute("aria-label") ||
+              el.getAttribute("title") ||
+              "";
+            if (text.includes(textToFind)) {
+              element = el;
+              break;
+            }
+          }
+        }
+      }
+
+      // If not found, try as text content match
+      if (!element) {
+        const allClickables = Array.from(
+          document.querySelectorAll(
+            'button, a, [role="button"], [role="radio"], [role="checkbox"], input[type="radio"], input[type="checkbox"], input[type="submit"], [onclick], [tabindex]',
+          ),
+        );
+        for (const el of allClickables) {
+          const text =
+            (el as HTMLElement).textContent?.trim() ||
+            el.getAttribute("aria-label") ||
+            el.getAttribute("title") ||
+            "";
+          if (
+            text === normalizedSel ||
+            text.toLowerCase().includes(normalizedSel.toLowerCase())
+          ) {
+            element = el as HTMLElement;
+            break;
+          }
+        }
+      }
+
+      if (!element)
+        return { success: false, error: `Element not found: ${sel}` };
+
+      await performClick(element, dblClick, btn, mods);
+      return { success: true, message: `Clicked: ${sel}` };
+    },
+    args: [selector, doubleClick ?? false, button ?? "left", modifiers ?? []],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Click failed";
+}
+
+async function typeText(
+  selector: string,
+  text: string,
+  submit?: boolean,
+  slowly?: boolean,
+): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: async (
+      sel: string,
+      txt: string,
+      shouldSubmit: boolean,
+      typeSlowly: boolean,
+    ) => {
+      // Try to extract ref ID
+      const refMatch = sel.trim().match(/[eE](\d+)/);
+      let element: HTMLInputElement | HTMLTextAreaElement | null = null;
+
+      if (refMatch) {
+        const refId = `e${refMatch[1]}`;
+        // Wait for element
+        const start = Date.now();
+        while (Date.now() - start < 3000) {
+          element = document.querySelector(
+            `[data-copilot-ref="${refId}"]`,
+          ) as HTMLInputElement;
+          if (element) break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      } else {
+        element = document.querySelector(sel) as HTMLInputElement;
+      }
+
+      if (!element)
+        return { success: false, error: `Element not found: ${sel}` };
+
+      // Scroll into view and focus
+      element.scrollIntoView({ behavior: "instant", block: "center" });
+      await new Promise((r) => setTimeout(r, 50));
+      element.focus();
+
+      // Clear existing value
+      element.value = "";
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+
+      // Type character by character
+      const delay = typeSlowly ? 100 : 10;
+      for (const char of txt) {
+        element.value += char;
+        element.dispatchEvent(
+          new KeyboardEvent("keydown", { key: char, bubbles: true }),
+        );
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+        element.dispatchEvent(
+          new KeyboardEvent("keyup", { key: char, bubbles: true }),
+        );
+        await new Promise((r) => setTimeout(r, delay));
+      }
+
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+
+      // Submit if requested (press Enter)
+      if (shouldSubmit) {
+        element.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Enter",
+            code: "Enter",
+            bubbles: true,
+          }),
+        );
+        element.dispatchEvent(
+          new KeyboardEvent("keyup", {
+            key: "Enter",
+            code: "Enter",
+            bubbles: true,
+          }),
+        );
+        // Also try form submit
+        const form = element.closest("form");
+        if (form) {
+          form.dispatchEvent(
+            new Event("submit", { bubbles: true, cancelable: true }),
+          );
+        }
+      }
+
+      return {
+        success: true,
+        message: `Typed "${txt}" into ${sel}${shouldSubmit ? " (submitted)" : ""}`,
+      };
+    },
+    args: [selector, text, submit ?? false, slowly ?? false],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Type failed";
+}
+
+async function scroll(
+  direction: "up" | "down",
+  amount?: number,
+): Promise<string> {
+  const tab = await getCurrentTab();
+  const scrollAmount = amount || 500;
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (dir: string, amt: number) => {
+      window.scrollBy(0, dir === "down" ? amt : -amt);
+    },
+    args: [direction, scrollAmount],
+  });
+  return `Scrolled ${direction} by ${scrollAmount}px`;
+}
+
+async function goBack(): Promise<string> {
+  const tab = await getCurrentTab();
+  await chrome.tabs.goBack(tab.id!);
+  return "Navigated back";
+}
+
+async function goForward(): Promise<string> {
+  const tab = await getCurrentTab();
+  await chrome.tabs.goForward(tab.id!);
+  return "Navigated forward";
+}
+
+async function reloadPage(): Promise<string> {
+  const tab = await getCurrentTab();
+  await chrome.tabs.reload(tab.id!);
+  return "Page reloaded";
+}
+
+async function openNewTab(url?: string): Promise<string> {
+  const newTab = await chrome.tabs.create({ url: url || "about:newtab" });
+  return `Opened new tab${url ? ` with ${url}` : ""}`;
+}
+
+async function closeCurrentTab(): Promise<string> {
+  const tab = await getCurrentTab();
+  await chrome.tabs.remove(tab.id!);
+  return "Closed current tab";
+}
+
+async function takeScreenshot(): Promise<string> {
+  const dataUrl = await chrome.tabs.captureVisibleTab();
+  // Return base64 data URL (could be displayed or saved)
+  return `Screenshot captured (${dataUrl.length} bytes)`;
+}
+
+// Export screenshot capture for Vision API
+export async function captureScreenshot(): Promise<string> {
+  try {
+    const dataUrl = await chrome.tabs.captureVisibleTab(undefined, {
+      format: "png",
+    });
+    // Return full data URL (let the server handle parsing)
+    return dataUrl;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Screenshot capture failed:", message);
+    if (message.includes("activeTab")) {
+      const err = new Error(
+        "SCREENSHOT_PERMISSION: activeTab permission not granted. Click the extension icon once or reinstall to grant permissions.",
+      );
+      (err as Error & { code?: string }).code = "ACTIVE_TAB";
+      throw err;
+    }
+    throw error;
+  }
+}
+
+async function getHtml(selector?: string): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (sel?: string) => {
+      if (sel) {
+        const element = document.querySelector(sel);
+        return element
+          ? element.outerHTML.slice(0, 5000)
+          : `Element not found: ${sel}`;
+      }
+      return document.documentElement.outerHTML.slice(0, 10000);
+    },
+    args: [selector],
+  });
+  return results[0]?.result || "Failed to get HTML";
+}
+
+async function waitForSelector(
+  selector: string,
+  timeout: number = 5000,
+): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: async (sel: string, ms: number) => {
+      const start = Date.now();
+      while (Date.now() - start < ms) {
+        if (document.querySelector(sel)) {
+          return { success: true, message: `Found ${sel}` };
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return { success: false, error: `Timeout waiting for ${sel}` };
+    },
+    args: [selector, timeout],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Wait failed";
+}
+
+// Wait for text to appear (like Playwright browser_wait_for)
+async function waitForText(
+  text: string,
+  timeout: number = 5000,
+): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: async (txt: string, ms: number) => {
+      const start = Date.now();
+      while (Date.now() - start < ms) {
+        if (document.body.innerText.includes(txt)) {
+          return { success: true, message: `Found text: "${txt}"` };
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return { success: false, error: `Timeout waiting for text: "${txt}"` };
+    },
+    args: [text, timeout],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Wait failed";
+}
+
+// Wait for text to disappear (like Playwright browser_wait_for textGone)
+async function waitForTextGone(
+  text: string,
+  timeout: number = 5000,
+): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: async (txt: string, ms: number) => {
+      const start = Date.now();
+      while (Date.now() - start < ms) {
+        if (!document.body.innerText.includes(txt)) {
+          return { success: true, message: `Text gone: "${txt}"` };
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return {
+        success: false,
+        error: `Timeout waiting for text to disappear: "${txt}"`,
+      };
+    },
+    args: [text, timeout],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Wait failed";
+}
+
+// Fill multiple form fields at once (like Playwright browser_fill_form)
+async function fillForm(
+  fields: { selector: string; value: string; type?: string }[],
+): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: async (
+      fieldsData: { selector: string; value: string; type?: string }[],
+    ) => {
+      const filled: string[] = [];
+      for (const field of fieldsData) {
+        // Extract ref if present
+        const refMatch = field.selector.trim().match(/[eE](\d+)/);
+        let element: HTMLElement | null = null;
+
+        if (refMatch) {
+          element = document.querySelector(
+            `[data-copilot-ref="e${refMatch[1]}"]`,
+          );
+        } else {
+          element = document.querySelector(field.selector);
+        }
+
+        if (!element) {
+          filled.push(`❌ ${field.selector}: not found`);
+          continue;
+        }
+
+        const inputType = field.type || "text";
+
+        if (inputType === "checkbox" || inputType === "radio") {
+          (element as HTMLInputElement).checked = field.value === "true";
+          element.dispatchEvent(new Event("change", { bubbles: true }));
+        } else if (inputType === "select") {
+          (element as HTMLSelectElement).value = field.value;
+          element.dispatchEvent(new Event("change", { bubbles: true }));
+        } else {
+          (element as HTMLInputElement).value = field.value;
+          element.dispatchEvent(new Event("input", { bubbles: true }));
+          element.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        filled.push(`✓ ${field.selector}`);
+      }
+      return {
+        success: true,
+        message: `Filled ${filled.length} fields: ${filled.join(", ")}`,
+      };
+    },
+    args: [fields],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Fill form failed";
+}
+
+// Click at specific coordinates (like Playwright browser_mouse_click_xy)
+async function clickAtCoordinates(
+  x: number,
+  y: number,
+  button?: "left" | "right",
+): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (posX: number, posY: number, btn: string) => {
+      const element = document.elementFromPoint(posX, posY) as HTMLElement;
+      if (!element) {
+        return { success: false, error: `No element at (${posX}, ${posY})` };
+      }
+
+      const buttonNum = btn === "right" ? 2 : 0;
+      const eventOpts: MouseEventInit = {
+        bubbles: true,
+        cancelable: true,
+        clientX: posX,
+        clientY: posY,
+        button: buttonNum,
+      };
+
+      if (btn === "right") {
+        element.dispatchEvent(new MouseEvent("contextmenu", eventOpts));
+      } else {
+        element.dispatchEvent(new MouseEvent("mousedown", eventOpts));
+        element.dispatchEvent(new MouseEvent("mouseup", eventOpts));
+        element.dispatchEvent(new MouseEvent("click", eventOpts));
+      }
+
+      return { success: true, message: `Clicked at (${posX}, ${posY})` };
+    },
+    args: [x, y, button ?? "left"],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Click failed";
+}
+
+// Handle browser dialogs (alert, confirm, prompt)
+async function handleDialog(
+  accept: boolean,
+  promptText?: string,
+): Promise<string> {
+  // Note: Chrome extensions can't directly intercept dialogs
+  // This sets up a handler for future dialogs via content script
+  const tab = await getCurrentTab();
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (shouldAccept: boolean, text?: string) => {
+      // Override window methods for next dialog
+      const originalAlert = window.alert;
+      const originalConfirm = window.confirm;
+      const originalPrompt = window.prompt;
+
+      window.alert = () => {
+        window.alert = originalAlert;
+      };
+      window.confirm = () => {
+        window.confirm = originalConfirm;
+        return shouldAccept;
+      };
+      window.prompt = () => {
+        window.prompt = originalPrompt;
+        return shouldAccept ? text || "" : null;
+      };
+    },
+    args: [accept, promptText],
+  });
+  return `Dialog handler set: ${accept ? "accept" : "dismiss"}`;
+}
+
+// Press a key (like Playwright browser_press_key)
+async function pressKey(key: string): Promise<string> {
+  const tab = await getCurrentTab();
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (keyName: string) => {
+      const activeElement = document.activeElement || document.body;
+      const eventOpts: KeyboardEventInit = {
+        key: keyName,
+        code: keyName,
+        bubbles: true,
+        cancelable: true,
+      };
+
+      // Handle special keys
+      if (keyName === "Enter") eventOpts.code = "Enter";
+      else if (keyName === "Escape") eventOpts.code = "Escape";
+      else if (keyName === "Tab") eventOpts.code = "Tab";
+      else if (keyName === "ArrowUp") eventOpts.code = "ArrowUp";
+      else if (keyName === "ArrowDown") eventOpts.code = "ArrowDown";
+      else if (keyName === "ArrowLeft") eventOpts.code = "ArrowLeft";
+      else if (keyName === "ArrowRight") eventOpts.code = "ArrowRight";
+      else if (keyName === "PageUp") eventOpts.code = "PageUp";
+      else if (keyName === "PageDown") eventOpts.code = "PageDown";
+
+      activeElement.dispatchEvent(new KeyboardEvent("keydown", eventOpts));
+      activeElement.dispatchEvent(new KeyboardEvent("keyup", eventOpts));
+    },
+    args: [key],
+  });
+  return `Pressed key: ${key}`;
+}
+
+// Check/uncheck checkbox or radio (like Playwright check/uncheck)
+async function checkElement(
+  selector: string,
+  checked: boolean,
+): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: async (sel: string, shouldCheck: boolean) => {
+      const refMatch = sel.trim().match(/[eE](\d+)/);
+      let element: HTMLInputElement | null = null;
+
+      if (refMatch) {
+        element = document.querySelector(
+          `[data-copilot-ref="e${refMatch[1]}"]`,
+        ) as HTMLInputElement;
+      } else {
+        element = document.querySelector(sel) as HTMLInputElement;
+      }
+
+      if (!element)
+        return { success: false, error: `Element not found: ${sel}` };
+
+      element.checked = shouldCheck;
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+
+      return {
+        success: true,
+        message: `${shouldCheck ? "Checked" : "Unchecked"}: ${sel}`,
+      };
+    },
+    args: [selector, checked],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Check failed";
+}
+
+// Evaluate JavaScript (like Playwright browser_evaluate)
+async function evaluateScript(
+  script: string,
+  selector?: string,
+): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (code: string, sel?: string) => {
+      try {
+        let element: HTMLElement | null = null;
+        if (sel) {
+          const refMatch = sel.trim().match(/[eE](\d+)/);
+          if (refMatch) {
+            element = document.querySelector(
+              `[data-copilot-ref="e${refMatch[1]}"]`,
+            );
+          } else {
+            element = document.querySelector(sel);
+          }
+        }
+
+        // Create function and execute
+        const fn = new Function("element", code);
+        const result = fn(element);
+
+        return {
+          success: true,
+          message: `Evaluated: ${JSON.stringify(result) ?? "undefined"}`,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: `Eval error: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    },
+    args: [script, selector],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Evaluate failed";
+}
+
+// Get console logs (like Playwright browser_console_messages)
+// Note: This requires injecting a logger beforehand
+async function getConsoleLogs(
+  level?: "error" | "warn" | "info" | "log",
+): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (filterLevel?: string) => {
+      // Check if we have captured console logs
+      const logs =
+        (
+          window as unknown as {
+            __copilotConsoleLogs?: {
+              level: string;
+              message: string;
+              ts: number;
+            }[];
+            __copilotConsolePatched?: boolean;
+          }
+        ).__copilotConsoleLogs || [];
+
+      const filtered = filterLevel
+        ? logs.filter((l) => l.level === filterLevel)
+        : logs;
+
+      return {
+        success: true,
+        message:
+          filtered.length > 0
+            ? filtered.map((l) => `[${l.level}] ${l.message}`).join("\n")
+            : "No console logs captured (logger initialized)",
+      };
+    },
+    args: [level],
+  });
+  const result = results[0]?.result;
+  return result?.success
+    ? result.message
+    : result?.error || "Get console failed";
+}
+
+// Get network requests (like Playwright browser_network_requests)
+// Note: This requires injecting a logger beforehand
+async function getNetworkRequests(includeStatic?: boolean): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (includeStaticResources: boolean) => {
+      const logs =
+        (
+          window as unknown as {
+            __copilotNetworkLogs?: {
+              method: string;
+              url: string;
+              status: number | string;
+              duration: number;
+              ts: number;
+            }[];
+          }
+        ).__copilotNetworkLogs || [];
+
+      if (logs.length > 0) {
+        const trimmed = logs.slice(-20);
+        return {
+          success: true,
+          message: trimmed
+            .map((r) => `${r.method} ${r.url} (${r.status}, ${r.duration}ms)`)
+            .join("\n"),
+        };
+      }
+
+      // Fallback: Use Performance API to get network entries
+      const entries = performance.getEntriesByType(
+        "resource",
+      ) as PerformanceResourceTiming[];
+
+      const staticExtensions = [
+        ".js",
+        ".css",
+        ".png",
+        ".jpg",
+        ".gif",
+        ".woff",
+        ".woff2",
+        ".svg",
+        ".ico",
+      ];
+
+      const filtered = includeStaticResources
+        ? entries
+        : entries.filter(
+            (e) => !staticExtensions.some((ext) => e.name.includes(ext)),
+          );
+
+      const requests = filtered.slice(-20).map((e) => ({
+        url: e.name,
+        type: e.initiatorType,
+        duration: Math.round(e.duration),
+      }));
+
+      return {
+        success: true,
+        message:
+          requests.length > 0
+            ? requests
+                .map((r) => `${r.type}: ${r.url} (${r.duration}ms)`)
+                .join("\n")
+            : "No network requests found",
+      };
+    },
+    args: [includeStatic ?? false],
+  });
+  const result = results[0]?.result;
+  return result?.success
+    ? result.message
+    : result?.error || "Get network failed";
+}
+
+// Upload file (trigger file input click - actual file selection requires user interaction)
+async function uploadFile(selector: string): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (sel: string) => {
+      const refMatch = sel.trim().match(/[eE](\d+)/);
+      let element: HTMLInputElement | null = null;
+
+      if (refMatch) {
+        element = document.querySelector(
+          `[data-copilot-ref="e${refMatch[1]}"]`,
+        ) as HTMLInputElement;
+      } else {
+        element = document.querySelector(sel) as HTMLInputElement;
+      }
+
+      if (!element)
+        return { success: false, error: `Element not found: ${sel}` };
+
+      // Click to open file dialog
+      element.click();
+
+      return { success: true, message: `Opened file dialog for: ${sel}` };
+    },
+    args: [selector],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Upload failed";
+}
+
+// Parse action commands from LLM response
+export function parseActionsFromResponse(response: string): BrowserAction[] {
+  const actions: BrowserAction[] = [];
+
+  // Simpler approach: find [ACTION: and then find the matching ]
+  // Handle nested brackets by counting
+  let i = 0;
+  while (i < response.length) {
+    const actionStart = response.indexOf("[ACTION:", i);
+    if (actionStart === -1) break;
+
+    // Find matching closing bracket
+    let depth = 1;
+    let j = actionStart + 8; // Skip "[ACTION:"
+    while (j < response.length && depth > 0) {
+      if (response[j] === "[") depth++;
+      else if (response[j] === "]") depth--;
+      j++;
+    }
+
+    if (depth === 0) {
+      const actionContent = response.substring(actionStart + 8, j - 1).trim();
+      // Split by first comma only
+      const firstComma = actionContent.indexOf(",");
+      const actionType =
+        firstComma > 0
+          ? actionContent.substring(0, firstComma).trim()
+          : actionContent.trim();
+      const params =
+        firstComma > 0
+          ? actionContent.substring(firstComma + 1).trim()
+          : undefined;
+
+      const parsedAction = parseAction(actionType.toLowerCase(), params);
+      if (parsedAction) {
+        actions.push(parsedAction);
+      }
+    }
+
+    i = j;
+  }
+
+  return actions;
+}
+
+function parseAction(type: string, params?: string): BrowserAction | null {
+  const trimmedParams = params?.trim();
+
+  switch (type) {
+    case "navigate":
+    case "goto":
+    case "open":
+      return trimmedParams ? { type: "navigate", url: trimmedParams } : null;
+    case "click": {
+      if (!trimmedParams) return null;
+      if (trimmedParams.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(trimmedParams) as {
+            selector?: string;
+            doubleClick?: boolean;
+            button?: "left" | "right" | "middle";
+            modifiers?: ("Alt" | "Control" | "Meta" | "Shift")[];
+          };
+          return parsed.selector
+            ? {
+                type: "click",
+                selector: parsed.selector,
+                doubleClick: parsed.doubleClick,
+                button: parsed.button,
+                modifiers: parsed.modifiers,
+              }
+            : null;
+        } catch {
+          return { type: "click", selector: trimmedParams };
+        }
+      }
+      return { type: "click", selector: trimmedParams };
+    }
+    case "doubleclick":
+      return trimmedParams
+        ? { type: "click", selector: trimmedParams, doubleClick: true }
+        : null;
+    case "type":
+    case "input": {
+      if (!trimmedParams) return null;
+      if (trimmedParams.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(trimmedParams) as {
+            selector?: string;
+            text?: string;
+            submit?: boolean;
+            slowly?: boolean;
+          };
+          return parsed.selector && parsed.text
+            ? {
+                type: "type",
+                selector: parsed.selector,
+                text: parsed.text,
+                submit: parsed.submit,
+                slowly: parsed.slowly,
+              }
+            : null;
+        } catch {
+          // fall through to string parsing
+        }
+      }
+      const parts = trimmedParams.split(",").map((s) => s.trim());
+      const selector = parts.shift();
+      if (!selector) return null;
+
+      let submit = false;
+      let slowly = false;
+      while (parts.length > 1) {
+        const last = parts[parts.length - 1].toLowerCase();
+        if (last === "submit") {
+          submit = true;
+          parts.pop();
+          continue;
+        }
+        if (last === "slowly" || last === "slow") {
+          slowly = true;
+          parts.pop();
+          continue;
+        }
+        break;
+      }
+
+      const text = parts.join(",").trim();
+      return text ? { type: "type", selector, text, submit, slowly } : null;
+    }
+    case "scroll":
+      return {
+        type: "scroll",
+        direction: trimmedParams === "up" ? "up" : "down",
+      };
+    case "back":
+      return { type: "back" };
+    case "forward":
+      return { type: "forward" };
+    case "reload":
+    case "refresh":
+      return { type: "reload" };
+    case "newtab":
+      return { type: "newTab", url: trimmedParams };
+    case "closetab":
+      return { type: "closeTab" };
+    case "screenshot":
+      return { type: "screenshot" };
+    case "gethtml":
+      return { type: "getHtml", selector: trimmedParams };
+    case "waitforselector": {
+      if (!trimmedParams) return null;
+      const [selector, timeoutStr] =
+        trimmedParams.split(",").map((s) => s.trim()) || [];
+      const timeout = timeoutStr ? Number(timeoutStr) : undefined;
+      return selector
+        ? {
+            type: "waitForSelector",
+            selector,
+            timeout: Number.isFinite(timeout) ? timeout : undefined,
+          }
+        : null;
+    }
+    case "waitfortext": {
+      if (!trimmedParams) return null;
+      const [text, timeoutStr] =
+        trimmedParams.split(",").map((s) => s.trim()) || [];
+      const timeout = timeoutStr ? Number(timeoutStr) : undefined;
+      return text
+        ? {
+            type: "waitForText",
+            text,
+            timeout: Number.isFinite(timeout) ? timeout : undefined,
+          }
+        : null;
+    }
+    case "waitfortextgone": {
+      if (!trimmedParams) return null;
+      const [text, timeoutStr] =
+        trimmedParams.split(",").map((s) => s.trim()) || [];
+      const timeout = timeoutStr ? Number(timeoutStr) : undefined;
+      return text
+        ? {
+            type: "waitForTextGone",
+            text,
+            timeout: Number.isFinite(timeout) ? timeout : undefined,
+          }
+        : null;
+    }
+    // New enhanced actions
+    case "radio": {
+      const [selector, value] =
+        trimmedParams?.split(",").map((s) => s.trim()) || [];
+      return selector ? { type: "radio", selector, value } : null;
+    }
+    case "check":
+      return trimmedParams ? { type: "check", selector: trimmedParams } : null;
+    case "uncheck":
+      return trimmedParams
+        ? { type: "uncheck", selector: trimmedParams }
+        : null;
+    case "select": {
+      const [selector, value] =
+        trimmedParams?.split(",").map((s) => s.trim()) || [];
+      return selector && value ? { type: "select", selector, value } : null;
+    }
+    case "slider": {
+      const [selector, valueStr] =
+        trimmedParams?.split(",").map((s) => s.trim()) || [];
+      const value = parseFloat(valueStr);
+      return selector && !isNaN(value)
+        ? { type: "slider", selector, value }
+        : null;
+    }
+    case "fillform": {
+      if (!trimmedParams) return null;
+      if (trimmedParams.startsWith("{") || trimmedParams.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(trimmedParams);
+          const fields = Array.isArray(parsed) ? parsed : parsed?.fields || [];
+          return fields.length > 0 ? { type: "fillForm", fields } : null;
+        } catch {
+          // fall through
+        }
+      }
+      const fields = trimmedParams
+        .split(";")
+        .map((pair) => pair.trim())
+        .filter(Boolean)
+        .map((pair) => {
+          const [selector, value] = pair.split("=").map((p) => p.trim());
+          return { selector, value: value ?? "" };
+        })
+        .filter((f) => f.selector);
+      return fields.length > 0 ? { type: "fillForm", fields } : null;
+    }
+    case "upload": {
+      if (!trimmedParams) return null;
+      const [selector] = trimmedParams.split(",").map((s) => s.trim());
+      return selector ? { type: "upload", selector, files: [] } : null;
+    }
+    case "drag": {
+      const [start, end] = trimmedParams?.split(",").map((s) => s.trim()) || [];
+      return start && end
+        ? { type: "drag", startSelector: start, endSelector: end }
+        : null;
+    }
+    case "hover":
+      return trimmedParams ? { type: "hover", selector: trimmedParams } : null;
+    case "focus":
+      return trimmedParams ? { type: "focus", selector: trimmedParams } : null;
+    case "clickxy": {
+      if (!trimmedParams) return null;
+      const [xStr, yStr, button] =
+        trimmedParams.split(",").map((s) => s.trim()) || [];
+      const x = Number(xStr);
+      const y = Number(yStr);
+      return Number.isFinite(x) && Number.isFinite(y)
+        ? {
+            type: "clickXY",
+            x,
+            y,
+            button: button as "left" | "right" | undefined,
+          }
+        : null;
+    }
+    case "handledialog": {
+      if (!trimmedParams) return null;
+      const [decision, ...textParts] =
+        trimmedParams.split(",").map((s) => s.trim()) || [];
+      const accept =
+        decision.toLowerCase() === "accept" ||
+        decision.toLowerCase() === "true";
+      const promptText = textParts.join(",").trim();
+      return {
+        type: "handleDialog",
+        accept,
+        promptText: promptText || undefined,
+      };
+    }
+    case "presskey":
+    case "press":
+    case "key":
+      return trimmedParams ? { type: "pressKey", key: trimmedParams } : null;
+    case "evaluate": {
+      if (!trimmedParams) return null;
+      if (trimmedParams.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(trimmedParams) as {
+            script?: string;
+            selector?: string;
+          };
+          return parsed.script
+            ? {
+                type: "evaluate",
+                script: parsed.script,
+                selector: parsed.selector,
+              }
+            : null;
+        } catch {
+          // fall through
+        }
+      }
+      const firstComma = trimmedParams.indexOf(",");
+      if (firstComma > 0) {
+        const selector = trimmedParams.substring(0, firstComma).trim();
+        const script = trimmedParams.substring(firstComma + 1).trim();
+        return script ? { type: "evaluate", selector, script } : null;
+      }
+      return { type: "evaluate", script: trimmedParams };
+    }
+    case "getconsole":
+    case "console":
+      return {
+        type: "getConsole",
+        level: trimmedParams as "error" | "warn" | "info" | "log",
+      };
+    case "getnetwork":
+    case "network": {
+      const includeStatic =
+        trimmedParams === "true" || trimmedParams === "static";
+      return { type: "getNetwork", includeStatic };
+    }
+    case "playwright": {
+      // Format: playwright, action_name, {json_params}
+      const firstComma = trimmedParams?.indexOf(",") || -1;
+      if (firstComma > 0) {
+        const action = trimmedParams!.substring(0, firstComma).trim();
+        const paramsStr = trimmedParams!.substring(firstComma + 1).trim();
+        try {
+          const params = JSON.parse(paramsStr);
+          return { type: "playwright", action, params };
+        } catch {
+          return { type: "playwright", action, params: { raw: paramsStr } };
+        }
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+// File operation types
+export interface FileAction {
+  type: "create" | "append";
+  path: string;
+  content: string;
+}
+
+// Parse file commands from LLM response
+export function parseFileActionsFromResponse(response: string): FileAction[] {
+  const actions: FileAction[] = [];
+
+  // Look for file blocks in format: [FILE: action, path, content]
+  const fileRegex = /\[FILE:\s*(create|append),\s*([^,\]]+),\s*([\s\S]*?)\]/gi;
+  let match;
+
+  while ((match = fileRegex.exec(response)) !== null) {
+    const [, actionType, path, content] = match;
+    actions.push({
+      type: actionType.toLowerCase() as "create" | "append",
+      path: path.trim(),
+      content: content.trim(),
+    });
+  }
+
+  return actions;
+}
+
+// Execute file action via VS Code extension
+export async function executeFileAction(action: FileAction): Promise<string> {
+  try {
+    const response = await fetch("http://localhost:3210/file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: action.type,
+        path: action.path,
+        content: action.content,
+      }),
+    });
+
+    const result = await response.json();
+    if (result.success) {
+      return `✓ ${result.message}`;
+    } else {
+      return `✗ ${result.error}`;
+    }
+  } catch (error) {
+    return `✗ Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+// ============================================
+// NEW ENHANCED DOM ACTIONS
+// ============================================
+
+// Helper to find element by ref or selector
+async function findElement(
+  tab: chrome.tabs.Tab,
+  selector: string,
+): Promise<{ found: boolean; refId?: string }> {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (sel: string) => {
+      // Handle ref patterns
+      const refPatterns = [
+        /^(?:ref:)?([eE]\d+)$/,
+        /^\[ref[=:]"?([eE]\d+)"?\]$/,
+        /^\[data-copilot-ref[=:]"?([eE]\d+)"?\]$/,
+      ];
+
+      for (const pattern of refPatterns) {
+        const match = sel.match(pattern);
+        if (match) {
+          const refId = match[1].toLowerCase();
+          const element = document.querySelector(
+            `[data-copilot-ref="${refId}"]`,
+          );
+          return { found: !!element, refId };
+        }
+      }
+
+      // Try direct selector
+      const element = document.querySelector(sel);
+      return { found: !!element };
+    },
+    args: [selector],
+  });
+  return results[0]?.result || { found: false };
+}
+
+// Select radio button
+async function selectRadio(selector: string, value?: string): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (sel: string, val?: string) => {
+      // Handle ref pattern
+      const refMatch = sel.match(/^(?:ref:)?([eE]\d+)$/);
+      let element: HTMLElement | null = null;
+
+      if (refMatch) {
+        const refId = refMatch[1].toLowerCase();
+        element = document.querySelector(`[data-copilot-ref="${refId}"]`);
+      } else {
+        // Try as group selector - find radio with matching value or label
+        const group = document.querySelector(sel);
+        if (group) {
+          if (val) {
+            // Find radio by value or aria-label
+            element =
+              group.querySelector(`input[type="radio"][value="${val}"]`) ||
+              group.querySelector(`[role="radio"][aria-label*="${val}"]`) ||
+              group.querySelector(`[aria-label="${val}"]`);
+          } else {
+            // Click first radio in group
+            element = group.querySelector(
+              'input[type="radio"], [role="radio"]',
+            );
+          }
+        } else {
+          element = document.querySelector(sel);
+        }
+      }
+
+      if (!element) {
+        // Try finding by label text
+        const allRadios = Array.from(
+          document.querySelectorAll('input[type="radio"], [role="radio"]'),
+        );
+        for (const radio of allRadios) {
+          const label =
+            (radio as HTMLElement).getAttribute("aria-label") ||
+            (radio as HTMLElement).textContent?.trim() ||
+            "";
+          if (val && (label.includes(val) || label === val)) {
+            element = radio as HTMLElement;
+            break;
+          }
+        }
+      }
+
+      if (!element)
+        return {
+          success: false,
+          error: `Radio not found: ${sel}${val ? `, value: ${val}` : ""}`,
+        };
+
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      element.click();
+
+      // Dispatch events for frameworks
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+
+      return { success: true, message: `Selected radio: ${val || sel}` };
+    },
+    args: [selector, value],
+  });
+  const result = results[0]?.result;
+  return result?.success
+    ? result.message
+    : result?.error || "Radio selection failed";
+}
+
+// Select option from dropdown
+async function selectOption(selector: string, value: string): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (sel: string, val: string) => {
+      const refMatch = sel.match(/^(?:ref:)?([eE]\d+)$/);
+      let element: HTMLSelectElement | HTMLElement | null = null;
+
+      if (refMatch) {
+        const refId = refMatch[1].toLowerCase();
+        element = document.querySelector(`[data-copilot-ref="${refId}"]`);
+      } else {
+        element = document.querySelector(sel);
+      }
+
+      if (!element)
+        return { success: false, error: `Select element not found: ${sel}` };
+
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      // Handle native select
+      if (element.tagName === "SELECT") {
+        const select = element as HTMLSelectElement;
+        const option = Array.from(select.options).find(
+          (opt) => opt.value === val || opt.textContent?.trim() === val,
+        );
+        if (option) {
+          select.value = option.value;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+          return { success: true, message: `Selected: ${val}` };
+        }
+        return { success: false, error: `Option not found: ${val}` };
+      }
+
+      // Handle custom dropdown (click to open, then click option)
+      element.click();
+
+      // Wait a bit for dropdown to open
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          const options = document.querySelectorAll(
+            '[role="option"], [role="menuitem"], li, .option',
+          );
+          for (const opt of Array.from(options)) {
+            if (
+              opt.textContent?.trim() === val ||
+              opt.getAttribute("data-value") === val
+            ) {
+              (opt as HTMLElement).click();
+              resolve({ success: true, message: `Selected: ${val}` });
+              return;
+            }
+          }
+          resolve({ success: false, error: `Option not found: ${val}` });
+        }, 200);
+      });
+    },
+    args: [selector, value],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Select failed";
+}
+
+// Set slider value
+async function setSlider(selector: string, value: number): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (sel: string, val: number) => {
+      const refMatch = sel.match(/^(?:ref:)?([eE]\d+)$/);
+      let element: HTMLInputElement | HTMLElement | null = null;
+
+      if (refMatch) {
+        const refId = refMatch[1].toLowerCase();
+        element = document.querySelector(`[data-copilot-ref="${refId}"]`);
+      } else {
+        element = document.querySelector(sel);
+      }
+
+      if (!element)
+        return { success: false, error: `Slider not found: ${sel}` };
+
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      // Handle range input
+      if (
+        element.tagName === "INPUT" &&
+        (element as HTMLInputElement).type === "range"
+      ) {
+        const input = element as HTMLInputElement;
+        input.value = String(val);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        return { success: true, message: `Set slider to ${val}` };
+      }
+
+      // Handle custom slider (aria-valuenow)
+      if (element.getAttribute("role") === "slider") {
+        const min = parseFloat(element.getAttribute("aria-valuemin") || "0");
+        const max = parseFloat(element.getAttribute("aria-valuemax") || "100");
+        const clampedVal = Math.max(min, Math.min(max, val));
+
+        // Try setting via aria attribute and dispatching events
+        element.setAttribute("aria-valuenow", String(clampedVal));
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+
+        // Some frameworks need mouse events - simulate drag
+        const rect = element.getBoundingClientRect();
+        const percent = (clampedVal - min) / (max - min);
+        const x = rect.left + rect.width * percent;
+        const y = rect.top + rect.height / 2;
+
+        element.dispatchEvent(
+          new MouseEvent("mousedown", {
+            clientX: x,
+            clientY: y,
+            bubbles: true,
+          }),
+        );
+        element.dispatchEvent(
+          new MouseEvent("mousemove", {
+            clientX: x,
+            clientY: y,
+            bubbles: true,
+          }),
+        );
+        element.dispatchEvent(
+          new MouseEvent("mouseup", { clientX: x, clientY: y, bubbles: true }),
+        );
+
+        return { success: true, message: `Set slider to ${clampedVal}` };
+      }
+
+      return { success: false, error: `Element is not a slider: ${sel}` };
+    },
+    args: [selector, value],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Slider failed";
+}
+
+// Drag element from start to end
+async function dragElement(
+  startSelector: string,
+  endSelector: string,
+): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (startSel: string, endSel: string) => {
+      const getElement = (sel: string): HTMLElement | null => {
+        const refMatch = sel.match(/^(?:ref:)?([eE]\d+)$/);
+        if (refMatch) {
+          return document.querySelector(
+            `[data-copilot-ref="${refMatch[1].toLowerCase()}"]`,
+          );
+        }
+        return document.querySelector(sel);
+      };
+
+      const startEl = getElement(startSel);
+      const endEl = getElement(endSel);
+
+      if (!startEl)
+        return {
+          success: false,
+          error: `Start element not found: ${startSel}`,
+        };
+      if (!endEl)
+        return { success: false, error: `End element not found: ${endSel}` };
+
+      const startRect = startEl.getBoundingClientRect();
+      const endRect = endEl.getBoundingClientRect();
+
+      const startX = startRect.left + startRect.width / 2;
+      const startY = startRect.top + startRect.height / 2;
+      const endX = endRect.left + endRect.width / 2;
+      const endY = endRect.top + endRect.height / 2;
+
+      // Dispatch drag events
+      const dataTransfer = new DataTransfer();
+
+      startEl.dispatchEvent(
+        new DragEvent("dragstart", {
+          bubbles: true,
+          clientX: startX,
+          clientY: startY,
+          dataTransfer,
+        }),
+      );
+
+      startEl.dispatchEvent(
+        new DragEvent("drag", {
+          bubbles: true,
+          clientX: endX,
+          clientY: endY,
+          dataTransfer,
+        }),
+      );
+
+      endEl.dispatchEvent(
+        new DragEvent("dragenter", {
+          bubbles: true,
+          clientX: endX,
+          clientY: endY,
+          dataTransfer,
+        }),
+      );
+
+      endEl.dispatchEvent(
+        new DragEvent("dragover", {
+          bubbles: true,
+          clientX: endX,
+          clientY: endY,
+          dataTransfer,
+        }),
+      );
+
+      endEl.dispatchEvent(
+        new DragEvent("drop", {
+          bubbles: true,
+          clientX: endX,
+          clientY: endY,
+          dataTransfer,
+        }),
+      );
+
+      startEl.dispatchEvent(
+        new DragEvent("dragend", {
+          bubbles: true,
+          clientX: endX,
+          clientY: endY,
+          dataTransfer,
+        }),
+      );
+
+      return {
+        success: true,
+        message: `Dragged from ${startSel} to ${endSel}`,
+      };
+    },
+    args: [startSelector, endSelector],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Drag failed";
+}
+
+// Hover over element
+async function hoverElement(selector: string): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (sel: string) => {
+      const refMatch = sel.match(/^(?:ref:)?([eE]\d+)$/);
+      let element: HTMLElement | null = null;
+
+      if (refMatch) {
+        element = document.querySelector(
+          `[data-copilot-ref="${refMatch[1].toLowerCase()}"]`,
+        );
+      } else {
+        element = document.querySelector(sel);
+      }
+
+      if (!element)
+        return { success: false, error: `Element not found: ${sel}` };
+
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      const rect = element.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+
+      element.dispatchEvent(
+        new MouseEvent("mouseenter", { bubbles: true, clientX: x, clientY: y }),
+      );
+      element.dispatchEvent(
+        new MouseEvent("mouseover", { bubbles: true, clientX: x, clientY: y }),
+      );
+
+      return { success: true, message: `Hovered over: ${sel}` };
+    },
+    args: [selector],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Hover failed";
+}
+
+// Focus on element
+async function focusElement(selector: string): Promise<string> {
+  const tab = await getCurrentTab();
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    func: (sel: string) => {
+      const refMatch = sel.match(/^(?:ref:)?([eE]\d+)$/);
+      let element: HTMLElement | null = null;
+
+      if (refMatch) {
+        element = document.querySelector(
+          `[data-copilot-ref="${refMatch[1].toLowerCase()}"]`,
+        );
+      } else {
+        element = document.querySelector(sel);
+      }
+
+      if (!element)
+        return { success: false, error: `Element not found: ${sel}` };
+
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      element.focus();
+
+      return { success: true, message: `Focused: ${sel}` };
+    },
+    args: [selector],
+  });
+  const result = results[0]?.result;
+  return result?.success ? result.message : result?.error || "Focus failed";
+}
+
+// ============================================
+// PLAYWRIGHT MCP INTEGRATION
+// ============================================
+
+// Execute action via Playwright MCP (delegated to VS Code extension)
+export async function executeViaPlaywright(
+  action: string,
+  params: Record<string, unknown>,
+): Promise<string> {
+  try {
+    const response = await fetch("http://localhost:3210/playwright", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, params }),
+    });
+
+    if (!response.ok) {
+      return `Playwright error: ${response.status} ${response.statusText}`;
+    }
+
+    const result = await response.json();
+    if (result.success) {
+      return result.message || `Playwright: ${action} completed`;
+    } else {
+      return `Playwright error: ${result.error}`;
+    }
+  } catch (error) {
+    return `Playwright connection failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+// Check if Playwright MCP is available
+export async function checkPlaywrightAvailable(): Promise<boolean> {
+  try {
+    const response = await fetch("http://localhost:3210/playwright/status", {
+      method: "GET",
+    });
+    const result = await response.json();
+    playwrightAvailable = result.available === true;
+    return playwrightAvailable;
+  } catch {
+    playwrightAvailable = false;
+    return false;
+  }
+}
+
+// Execute with fallback: try local DOM first, then Playwright (or vice versa if preferPlaywright)
+export async function executeWithFallback(
+  action: BrowserAction,
+): Promise<string> {
+  // If prefer Playwright and it's available, try Playwright first
+  if (preferPlaywright && playwrightAvailable) {
+    console.log("[Playwright] Preferred mode - using Playwright MCP...");
+    const playwrightAction = convertToPlaywrightAction(action);
+    if (playwrightAction) {
+      const result = await executeViaPlaywright(
+        playwrightAction.action,
+        playwrightAction.params,
+      );
+      // If Playwright succeeded, return
+      if (!result.includes("error") && !result.includes("failed")) {
+        return result;
+      }
+      console.log("[Playwright] Failed, falling back to local DOM...");
+    }
+  }
+
+  // Try local DOM execution
+  const localResult = await executeBrowserAction(action);
+
+  // Check if local execution failed (includes "not found", "Error:", "failed")
+  const isError =
+    localResult.includes("not found") ||
+    localResult.startsWith("Error:") ||
+    localResult.includes("failed");
+
+  // If successful or Playwright not available, return local result
+  if (!isError || !playwrightAvailable) {
+    return localResult;
+  }
+
+  // Fallback to Playwright for complex actions
+  console.log("[Fallback] Local DOM failed, trying Playwright...");
+
+  // Convert action to Playwright format
+  const playwrightAction = convertToPlaywrightAction(action);
+  if (playwrightAction) {
+    return await executeViaPlaywright(
+      playwrightAction.action,
+      playwrightAction.params,
+    );
+  }
+
+  return localResult;
+}
+
+export function convertToPlaywrightAction(
+  action: BrowserAction,
+): { action: string; params: Record<string, unknown> } | null {
+  switch (action.type) {
+    case "click":
+      return { action: "browser_click", params: { ref: action.selector } };
+    case "type":
+      return {
+        action: "browser_type",
+        params: { ref: action.selector, text: action.text },
+      };
+    case "radio":
+      return {
+        action: "browser_click",
+        params: { ref: action.selector, element: `Radio: ${action.value}` },
+      };
+    case "select":
+      return {
+        action: "browser_select_option",
+        params: { ref: action.selector, values: [action.value] },
+      };
+    case "drag":
+      return {
+        action: "browser_drag",
+        params: { startRef: action.startSelector, endRef: action.endSelector },
+      };
+    case "hover":
+      return { action: "browser_hover", params: { ref: action.selector } };
+    case "navigate":
+      return { action: "browser_navigate", params: { url: action.url } };
+    case "scroll":
+      // Playwright doesn't have direct scroll, use keyboard
+      return {
+        action: "browser_press_key",
+        params: { key: action.direction === "down" ? "PageDown" : "PageUp" },
+      };
+    case "back":
+      return { action: "browser_navigate_back", params: {} };
+    case "forward":
+      // Playwright: go forward (via evaluate)
+      return {
+        action: "browser_evaluate",
+        params: { function: "() => { history.forward(); }" },
+      };
+    case "reload":
+      return {
+        action: "browser_evaluate",
+        params: { function: "() => { location.reload(); }" },
+      };
+    case "newTab":
+      return {
+        action: "browser_tabs",
+        params: { action: "new" },
+      };
+    case "closeTab":
+      return {
+        action: "browser_tabs",
+        params: { action: "close" },
+      };
+    case "screenshot":
+      return {
+        action: "browser_take_screenshot",
+        params: { type: "png" },
+      };
+    case "getHtml":
+      return {
+        action: "browser_snapshot",
+        params: {},
+      };
+    case "waitForSelector":
+      return {
+        action: "browser_wait_for",
+        params: {
+          text: action.selector,
+          time: (action.timeout || 5000) / 1000,
+        },
+      };
+    case "slider":
+      // Use fill_form for slider
+      return {
+        action: "browser_fill_form",
+        params: {
+          fields: [
+            {
+              ref: action.selector,
+              type: "slider",
+              value: String(action.value),
+              name: "slider",
+            },
+          ],
+        },
+      };
+    case "focus":
+      // Click to focus
+      return { action: "browser_click", params: { ref: action.selector } };
+    case "playwright":
+      // Already a Playwright action, pass through
+      return { action: action.action, params: action.params };
+    default:
+      return null;
+  }
+}
