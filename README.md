@@ -1,6 +1,10 @@
 # Copilot Browser Bridge (Chrome Extension)
 
-🌐 ブラウザのページ内容をGitHub Copilot / ローカルLLMで解析・対話・自動操作するChrome拡張機能
+[![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-pending-orange?logo=google-chrome)](https://chrome.google.com/webstore)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub](https://img.shields.io/github/stars/aktsmm/copilot-browser-bridge?style=social)](https://github.com/aktsmm/copilot-browser-bridge)
+
+🌐 ブラウザのページ内容をLLM（GitHub Copilot / ローカルLLM）で解析・対話・自動操作するChrome拡張機能
 
 ## ✨ 特徴
 
@@ -70,7 +74,7 @@ npm run zip
 
 ## 📄 ライセンス
 
-MIT License
+MIT License © [yamapan](https://github.com/aktsmm)
 
 ## � プライバシーポリシー
 
@@ -99,4 +103,8 @@ MIT License
 
 ## �🔗 関連プロジェクト
 
-- [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode)
+- [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) - 必須のVS Code拡張機能
+
+## 👤 Author
+
+yamapan (https://github.com/aktsmm)
