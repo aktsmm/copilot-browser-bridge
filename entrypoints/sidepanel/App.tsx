@@ -757,22 +757,70 @@ export default function App() {
 
       // Execute file actions if enabled
       if (fileOperationsEnabled) {
+        const downloadResults: string[] = [];
+
+        const decodeBase64Utf8 = (b64: string) => {
+          const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+          return new TextDecoder("utf-8").decode(bytes);
+        };
+
+        // Pattern 1: New base64 download marker from VS Code agent tool
+        const downloadRegex =
+          /__DOWNLOAD_FILE__:([^:]+):([A-Za-z0-9+/=]+):__END_DOWNLOAD__/g;
+        let dlMatch;
+        while ((dlMatch = downloadRegex.exec(assistantMessage)) !== null) {
+          const [, filePath, b64Content] = dlMatch;
+          try {
+            const content = decodeBase64Utf8(b64Content);
+            const filename = filePath
+              .replace(/^[\/\\]+/, "")
+              .replace(/[\/\\]/g, "_");
+            const result = await executeFileAction({
+              type: "create",
+              path: filename,
+              content,
+            });
+            if (result.success) {
+              const showLink = result.downloadId
+                ? ` ([フォルダで表示](download-show:${result.downloadId}))`
+                : "";
+              downloadResults.push(`• ✓ ${result.filename}${showLink}`);
+            } else {
+              downloadResults.push(
+                `• ✗ ${result.filename}: ${result.error || "ダウンロードに失敗しました"}`,
+              );
+            }
+          } catch (e) {
+            downloadResults.push(
+              `• \u2717 Base64\u30c7\u30b3\u30fc\u30c9\u30a8\u30e9\u30fc: ${filePath}`,
+            );
+          }
+        }
+
+        // Pattern 2: Legacy [FILE: create, ...] pattern
         const fileActions = parseFileActionsFromResponse(assistantMessage);
-        if (fileActions.length > 0) {
-          const fileResults: string[] = [];
-          for (const action of fileActions) {
-            const result = await executeFileAction(action);
-            fileResults.push(`• ${result}`);
+        for (const action of fileActions) {
+          const result = await executeFileAction(action);
+          if (result.success) {
+            const showLink = result.downloadId
+              ? ` ([フォルダで表示](download-show:${result.downloadId}))`
+              : "";
+            downloadResults.push(`• ✓ ${result.filename}${showLink}`);
+          } else {
+            downloadResults.push(
+              `• ✗ ${result.filename}: ${result.error || "ダウンロードに失敗しました"}`,
+            );
           }
-          if (fileResults.length > 0) {
-            setMessages((prev: ChatMessage[]) => [
-              ...prev,
-              {
-                role: "assistant",
-                content: `📁 ${language === "ja" ? "ファイル操作結果" : "File operation results"}:\n${fileResults.join("\n")}`,
-              },
-            ]);
-          }
+        }
+
+        if (downloadResults.length > 0) {
+          setMessages((prev: ChatMessage[]) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: `\ud83d\udce5 ${language === "ja" ? "\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u5b8c\u4e86" : "Download complete"}:\n${downloadResults.join("\n")}\n\n\ud83d\udcc2 \u4fdd\u5b58\u5148: \u30d6\u30e9\u30a6\u30b6\u306e\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u30d5\u30a9\u30eb\u30c0`,
+            },
+          ]);
         }
       }
     } catch (error) {

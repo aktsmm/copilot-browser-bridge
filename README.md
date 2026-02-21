@@ -98,7 +98,6 @@ This extension respects user privacy.
 | scripting        | Analyze page DOM elements |
 | storage          | Save user settings        |
 | sidePanel        | Display chat UI           |
-| tabCapture       | Capture screenshots       |
 | host_permissions | Work on any web page      |
 
 ### LLM Data Transmission

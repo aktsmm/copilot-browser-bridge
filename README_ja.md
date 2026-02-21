@@ -98,7 +98,6 @@ MIT License © [yamapan](https://github.com/aktsmm)
 | scripting        | ページのDOM要素を解析するため           |
 | storage          | ユーザー設定を保存するため              |
 | sidePanel        | チャットUIを表示するため                |
-| tabCapture       | スクリーンショットを取得するため        |
 | host_permissions | 任意のWebページで動作するため           |
 
 ### LLMへのデータ送信

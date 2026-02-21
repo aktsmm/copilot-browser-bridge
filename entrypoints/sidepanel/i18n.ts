@@ -21,6 +21,8 @@ export const translations = {
     stop: "停止",
     clear: "🗑️ クリア",
     executionResult: "🤖 実行結果:",
+    copy: "コピー",
+    copied: "コピー済み",
 
     // Settings
     settingsTitle: "設定",
@@ -56,6 +58,8 @@ export const translations = {
     stop: "Stop",
     clear: "🗑️ Clear",
     executionResult: "🤖 Execution Result:",
+    copy: "Copy",
+    copied: "Copied",
 
     // Settings
     settingsTitle: "Settings",

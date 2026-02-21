@@ -5,7 +5,7 @@ export default defineConfig({
   manifest: {
     name: "Copilot Browser Bridge",
     description: "ブラウザのページ内容をCopilot/ローカルLLMで解析・対話",
-    version: "0.1.0",
+    version: "0.1.1",
     icons: {
       16: "icon/16.png",
       48: "icon/48.png",
@@ -13,12 +13,12 @@ export default defineConfig({
     },
     permissions: [
       "activeTab",
-      "tabCapture",
       "tabs",
       "scripting",
       "storage",
       "sidePanel",
       "contextMenus",
+      "downloads",
     ],
     host_permissions: ["<all_urls>"],
     side_panel: {

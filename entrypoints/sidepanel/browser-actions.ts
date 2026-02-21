@@ -1553,6 +1553,13 @@ export interface FileAction {
   content: string;
 }
 
+export interface FileActionResult {
+  success: boolean;
+  filename: string;
+  downloadId?: number;
+  error?: string;
+}
+
 // Parse file commands from LLM response
 export function parseFileActionsFromResponse(response: string): FileAction[] {
   const actions: FileAction[] = [];
@@ -1573,27 +1580,52 @@ export function parseFileActionsFromResponse(response: string): FileAction[] {
   return actions;
 }
 
-// Execute file action via VS Code extension
-export async function executeFileAction(action: FileAction): Promise<string> {
+// Execute file action — download to browser's default download folder
+export async function executeFileAction(
+  action: FileAction,
+): Promise<FileActionResult> {
   try {
-    const response = await fetch("http://localhost:3210/file", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: action.type,
-        path: action.path,
-        content: action.content,
-      }),
-    });
+    const filename = action.path
+      .replace(/^[\/\\]+/, "")
+      .replace(/[\/\\]/g, "_");
 
-    const result = await response.json();
-    if (result.success) {
-      return `✓ ${result.message}`;
-    } else {
-      return `✗ ${result.error}`;
-    }
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        {
+          type: "download-file",
+          filename,
+          content: action.content,
+          mimeType: "text/plain;charset=utf-8",
+        },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            resolve({
+              success: false,
+              filename,
+              error: chrome.runtime.lastError.message,
+            });
+          } else if (response?.success) {
+            resolve({
+              success: true,
+              filename,
+              downloadId: response.downloadId,
+            });
+          } else {
+            resolve({
+              success: false,
+              filename,
+              error: response?.error || "ダウンロードに失敗しました",
+            });
+          }
+        },
+      );
+    });
   } catch (error) {
-    return `✗ Error: ${error instanceof Error ? error.message : String(error)}`;
+    return {
+      success: false,
+      filename: action.path,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
