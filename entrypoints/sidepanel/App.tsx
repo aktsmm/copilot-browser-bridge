@@ -177,12 +177,10 @@ export default function App() {
 
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: async (
-          opts: {
-            mode: "interactive" | "content";
-            autoScrollForLazyLoad: boolean;
-          },
-        ) => {
+        func: async (opts: {
+          mode: "interactive" | "content";
+          autoScrollForLazyLoad: boolean;
+        }) => {
           const VIEWPORT_MARGIN_PX = 200;
           const MAX_VIEWPORT_CHARS = 12000;
           const MAX_FULL_CHARS = 45000;
@@ -193,7 +191,10 @@ export default function App() {
               return true;
             }
             // Avoid password fields
-            if (parent instanceof HTMLInputElement && parent.type === "password") {
+            if (
+              parent instanceof HTMLInputElement &&
+              parent.type === "password"
+            ) {
               return true;
             }
             const style = getComputedStyle(parent);
@@ -214,7 +215,8 @@ export default function App() {
                 acceptNode: (node) => {
                   const parent = node.parentElement as HTMLElement | null;
                   if (!parent) return NodeFilter.FILTER_REJECT;
-                  if (shouldRejectParent(parent)) return NodeFilter.FILTER_REJECT;
+                  if (shouldRejectParent(parent))
+                    return NodeFilter.FILTER_REJECT;
 
                   if (onlyViewport) {
                     const rect = parent.getBoundingClientRect();
@@ -274,15 +276,11 @@ export default function App() {
           // Put viewport text first so the VS Code side (which may slice) keeps the most relevant content.
           const viewportText = collectText(true, MAX_VIEWPORT_CHARS);
           const fullText =
-            opts.mode === "content"
-              ? collectText(false, MAX_FULL_CHARS)
-              : "";
+            opts.mode === "content" ? collectText(false, MAX_FULL_CHARS) : "";
 
           const pageText =
             `### Viewport Text\n${scrollInfo}\n\n${viewportText || "(no text found in viewport)"}` +
-            (fullText
-              ? `\n\n### Full Page Text (truncated)\n${fullText}`
-              : "");
+            (fullText ? `\n\n### Full Page Text (truncated)\n${fullText}` : "");
 
           // Playwright-style snapshot: structured element tree
           const elements: string[] = [];
@@ -527,10 +525,12 @@ export default function App() {
   const sendMessage = async (userMessage: string) => {
     if (!userMessage.trim() || isLoading) return;
 
-    const wantsContentOnly = /\b(translate|translation|summarize|summary)\b/i.test(
+    const wantsContentOnly =
+      /\b(translate|translation|summarize|summary)\b/i.test(userMessage) ||
+      /(翻訳|要約|まとめ|全文|全内容|全部|記事|英文に)/.test(userMessage);
+    const autoScrollForLazyLoad = /(全文|全内容|全部|記事全体|最後まで)/.test(
       userMessage,
-    ) || /(翻訳|要約|まとめ|全文|全内容|全部|記事|英文に)/.test(userMessage);
-    const autoScrollForLazyLoad = /(全文|全内容|全部|記事全体|最後まで)/.test(userMessage);
+    );
 
     const newUserMessage: ChatMessage = {
       role: "user",
@@ -756,13 +756,17 @@ export default function App() {
             try {
               updatedScreenshot = await captureScreenshot();
               // Also get DOM elements for ref-based clicking
-              const domContent = await extractPageContent({ mode: "interactive" });
+              const domContent = await extractPageContent({
+                mode: "interactive",
+              });
               updatedPageContent = `[Screenshot attached]\n\n${domContent}`;
               console.log("[Agent] Screenshot captured for fallback mode");
             } catch (e) {
               console.error("Screenshot fallback failed:", e);
               maybeWarnScreenshotPermission(e);
-              updatedPageContent = await extractPageContent({ mode: "interactive" });
+              updatedPageContent = await extractPageContent({
+                mode: "interactive",
+              });
             }
           } else {
             updatedPageContent = await extractPageContent({
