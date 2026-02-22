@@ -70,8 +70,8 @@ function extractVisibleText(): string {
     }
   }
 
-  // 最大10,000文字に制限
-  return texts.join(" ").slice(0, 10000);
+  // 最大50,000文字に制限
+  return texts.join(" ").slice(0, 50000);
 }
 
 function extractInteractiveElements(): string {

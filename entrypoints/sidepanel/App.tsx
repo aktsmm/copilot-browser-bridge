@@ -151,7 +151,10 @@ export default function App() {
     }
   };
 
-  const extractPageContent = async (): Promise<string> => {
+  const extractPageContent = async (options?: {
+    mode?: "interactive" | "content";
+    autoScrollForLazyLoad?: boolean;
+  }): Promise<string> => {
     try {
       const [tab] = await chrome.tabs.query({
         active: true,
@@ -169,38 +172,117 @@ export default function App() {
         return `[システムページ: ${tab.url}] - このページの内容は取得できません`;
       }
 
+      const mode = options?.mode ?? "interactive";
+      const autoScrollForLazyLoad = options?.autoScrollForLazyLoad ?? false;
+
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: () => {
-          // Extract visible text content
-          const walker = document.createTreeWalker(
-            document.body,
-            NodeFilter.SHOW_TEXT,
-            {
-              acceptNode: (node) => {
-                const parent = node.parentElement;
-                if (!parent) return NodeFilter.FILTER_REJECT;
-                const style = getComputedStyle(parent);
-                if (style.display === "none" || style.visibility === "hidden") {
-                  return NodeFilter.FILTER_REJECT;
-                }
-                if (["SCRIPT", "STYLE", "NOSCRIPT"].includes(parent.tagName)) {
-                  return NodeFilter.FILTER_REJECT;
-                }
-                return NodeFilter.FILTER_ACCEPT;
-              },
-            },
-          );
+        func: async (
+          opts: {
+            mode: "interactive" | "content";
+            autoScrollForLazyLoad: boolean;
+          },
+        ) => {
+          const VIEWPORT_MARGIN_PX = 200;
+          const MAX_VIEWPORT_CHARS = 12000;
+          const MAX_FULL_CHARS = 45000;
 
-          const texts: string[] = [];
-          let node;
-          while ((node = walker.nextNode())) {
-            const text = node.textContent?.trim();
-            if (text && text.length > 0) {
-              texts.push(text);
+          const shouldRejectParent = (parent: HTMLElement) => {
+            const tag = parent.tagName;
+            if (["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"].includes(tag)) {
+              return true;
             }
+            // Avoid password fields
+            if (parent instanceof HTMLInputElement && parent.type === "password") {
+              return true;
+            }
+            const style = getComputedStyle(parent);
+            if (style.display === "none" || style.visibility === "hidden") {
+              return true;
+            }
+            return false;
+          };
+
+          const collectText = (
+            onlyViewport: boolean,
+            maxChars: number,
+          ): string => {
+            const walker = document.createTreeWalker(
+              document.body,
+              NodeFilter.SHOW_TEXT,
+              {
+                acceptNode: (node) => {
+                  const parent = node.parentElement as HTMLElement | null;
+                  if (!parent) return NodeFilter.FILTER_REJECT;
+                  if (shouldRejectParent(parent)) return NodeFilter.FILTER_REJECT;
+
+                  if (onlyViewport) {
+                    const rect = parent.getBoundingClientRect();
+                    const within =
+                      rect.bottom >= -VIEWPORT_MARGIN_PX &&
+                      rect.top <= window.innerHeight + VIEWPORT_MARGIN_PX;
+                    if (!within) return NodeFilter.FILTER_REJECT;
+                  }
+
+                  return NodeFilter.FILTER_ACCEPT;
+                },
+              },
+            );
+
+            const chunks: string[] = [];
+            let total = 0;
+            let node: Node | null;
+            while ((node = walker.nextNode())) {
+              const text = node.textContent?.trim();
+              if (!text) continue;
+              if (text.length === 0) continue;
+
+              chunks.push(text);
+              total += text.length + 1;
+              if (total >= maxChars) break;
+            }
+
+            return chunks.join("\n").slice(0, maxChars);
+          };
+
+          const autoScrollToLoad = async () => {
+            const startY = window.scrollY;
+            const step = Math.max(300, Math.floor(window.innerHeight * 0.9));
+            let lastY = -1;
+            for (let i = 0; i < 30; i++) {
+              window.scrollBy(0, step);
+              await new Promise((r) => setTimeout(r, 200));
+              if (Math.abs(window.scrollY - lastY) < 2) break;
+              lastY = window.scrollY;
+              if (
+                window.innerHeight + window.scrollY >=
+                document.documentElement.scrollHeight - 2
+              ) {
+                break;
+              }
+            }
+            window.scrollTo(0, startY);
+            await new Promise((r) => setTimeout(r, 100));
+          };
+
+          if (opts.mode === "content" && opts.autoScrollForLazyLoad) {
+            await autoScrollToLoad();
           }
-          const pageText = texts.join(" ").slice(0, 2000);
+
+          const scrollInfo = `ScrollY: ${Math.round(window.scrollY)} / ${Math.round(document.documentElement.scrollHeight)} (vh=${Math.round(window.innerHeight)})`;
+
+          // Put viewport text first so the VS Code side (which may slice) keeps the most relevant content.
+          const viewportText = collectText(true, MAX_VIEWPORT_CHARS);
+          const fullText =
+            opts.mode === "content"
+              ? collectText(false, MAX_FULL_CHARS)
+              : "";
+
+          const pageText =
+            `### Viewport Text\n${scrollInfo}\n\n${viewportText || "(no text found in viewport)"}` +
+            (fullText
+              ? `\n\n### Full Page Text (truncated)\n${fullText}`
+              : "");
 
           // Playwright-style snapshot: structured element tree
           const elements: string[] = [];
@@ -426,8 +508,13 @@ export default function App() {
             }
           });
 
-          return pageText + "\n" + output;
+          if (opts.mode === "content") {
+            return pageText;
+          }
+
+          return pageText + "\n\n" + output;
         },
+        args: [{ mode, autoScrollForLazyLoad }],
       });
 
       return results[0]?.result || "";
@@ -439,6 +526,11 @@ export default function App() {
 
   const sendMessage = async (userMessage: string) => {
     if (!userMessage.trim() || isLoading) return;
+
+    const wantsContentOnly = /\b(translate|translation|summarize|summary)\b/i.test(
+      userMessage,
+    ) || /(翻訳|要約|まとめ|全文|全内容|全部|記事|英文に)/.test(userMessage);
+    const autoScrollForLazyLoad = /(全文|全内容|全部|記事全体|最後まで)/.test(userMessage);
 
     const newUserMessage: ChatMessage = {
       role: "user",
@@ -461,16 +553,19 @@ export default function App() {
         try {
           screenshotBase64 = await captureScreenshot();
           // Also get DOM elements for ref-based clicking
-          const domContent = await extractPageContent();
+          const domContent = await extractPageContent({ mode: "interactive" });
           pageContent = `[Screenshot attached - use image for visual understanding]\n\n${domContent}`;
         } catch (e) {
           console.error("Screenshot failed:", e);
           maybeWarnScreenshotPermission(e);
-          pageContent = await extractPageContent();
+          pageContent = await extractPageContent({ mode: "interactive" });
         }
       } else {
         // Text or Hybrid mode: extract text
-        pageContent = await extractPageContent();
+        pageContent = await extractPageContent({
+          mode: wantsContentOnly ? "content" : "interactive",
+          autoScrollForLazyLoad: wantsContentOnly && autoScrollForLazyLoad,
+        });
       }
 
       // Send to VS Code extension
@@ -661,16 +756,19 @@ export default function App() {
             try {
               updatedScreenshot = await captureScreenshot();
               // Also get DOM elements for ref-based clicking
-              const domContent = await extractPageContent();
+              const domContent = await extractPageContent({ mode: "interactive" });
               updatedPageContent = `[Screenshot attached]\n\n${domContent}`;
               console.log("[Agent] Screenshot captured for fallback mode");
             } catch (e) {
               console.error("Screenshot fallback failed:", e);
               maybeWarnScreenshotPermission(e);
-              updatedPageContent = await extractPageContent();
+              updatedPageContent = await extractPageContent({ mode: "interactive" });
             }
           } else {
-            updatedPageContent = await extractPageContent();
+            updatedPageContent = await extractPageContent({
+              mode: wantsContentOnly ? "content" : "interactive",
+              autoScrollForLazyLoad: wantsContentOnly && autoScrollForLazyLoad,
+            });
           }
 
           // Add results to conversation
