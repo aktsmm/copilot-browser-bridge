@@ -78,6 +78,10 @@ npm run zip
 
 CC BY-NC-SA 4.0 © [aktsmm](https://github.com/aktsmm)
 
+## Third-Party Notices
+
+- [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)
+
 ## Privacy Policy
 
 This extension respects user privacy.
