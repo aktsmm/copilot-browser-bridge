@@ -35,8 +35,8 @@
 
 ## 📋 必要条件
 
-- **VS Code拡張機能**: [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) が必要です
-- **GitHub Copilot** または **ローカルLLM**（LM Studio等）
+- **必須（常時）**: [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode)（VS Code拡張機能）
+- **LLMプロバイダー**: **GitHub Copilot サブスクリプション**（Copilotプロバイダーを使う場合のみ）または **ローカルLLM**（LM Studio等）
 
 ## 🎮 使い方
 

@@ -35,8 +35,8 @@ Available now: [Install from Chrome Web Store](https://chromewebstore.google.com
 
 ## Requirements
 
-- **VS Code Extension**: [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) is required
-- **GitHub Copilot** or **Local LLM** (LM Studio, etc.)
+- **Required (always)**: [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode)
+- **LLM provider**: **GitHub Copilot subscription** (only when using Copilot provider) or **Local LLM** (LM Studio, etc.)
 
 ## Usage
 
