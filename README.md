@@ -1,6 +1,6 @@
 # Copilot Browser Bridge (Chrome Extension)
 
-[![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-pending-orange?logo=google-chrome)](https://chrome.google.com/webstore)
+[![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-live-brightgreen?logo=google-chrome)](https://chromewebstore.google.com/detail/copilot-browser-bridge/nggfpdadfepkbpjfnpcihagbnnfpeian)
 [![License CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](LICENSE)
 [![GitHub](https://img.shields.io/github/stars/aktsmm/copilot-browser-bridge?style=social)](https://github.com/aktsmm/copilot-browser-bridge)
 
@@ -31,7 +31,7 @@ Chrome extension to analyze, interact, and automate browser pages with LLM (GitH
 
 ### Chrome Web Store
 
-Under review - Coming soon!
+Available now: [Install from Chrome Web Store](https://chromewebstore.google.com/detail/copilot-browser-bridge/nggfpdadfepkbpjfnpcihagbnnfpeian)
 
 ## Requirements
 

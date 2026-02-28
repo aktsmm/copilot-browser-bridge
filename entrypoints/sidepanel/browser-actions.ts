@@ -1,5 +1,9 @@
 import type { BrowserAction, FormField } from "./types";
 
+const BRIDGE_CLIENT_HEADERS = {
+  "X-Copilot-Bridge-Client": "chrome-extension",
+} as const;
+
 // Playwright MCP availability flag (kept for future integration)
 let playwrightAvailable = false;
 let preferPlaywright = false;
@@ -14,6 +18,36 @@ export function setPreferPlaywright(prefer: boolean) {
 
 export function isPlaywrightPreferred(): boolean {
   return preferPlaywright && playwrightAvailable;
+}
+
+const EVALUATE_MAX_LENGTH = 2000;
+const EVALUATE_BLOCKED_PATTERN =
+  /\b(fetch|xmlhttprequest|websocket|eventsource|sendbeacon|localstorage|sessionstorage|indexeddb|document\.cookie|chrome\.|browser\.|eval\(|function\s*\(|import\s|window\.location|location\.)/i;
+
+function validateEvaluateScriptSource(source: string): {
+  ok: boolean;
+  reason?: string;
+} {
+  const trimmed = source.trim();
+  if (!trimmed) {
+    return { ok: false, reason: "Empty script is not allowed" };
+  }
+
+  if (trimmed.length > EVALUATE_MAX_LENGTH) {
+    return {
+      ok: false,
+      reason: `Script is too long (max ${EVALUATE_MAX_LENGTH} chars)`,
+    };
+  }
+
+  if (EVALUATE_BLOCKED_PATTERN.test(trimmed)) {
+    return {
+      ok: false,
+      reason: "Script contains blocked tokens for safety",
+    };
+  }
+
+  return { ok: true };
 }
 
 export async function executeBrowserAction(
@@ -1015,10 +1049,15 @@ async function evaluateScript(
   script: string,
   selector?: string,
 ): Promise<string> {
+  const safetyCheck = validateEvaluateScriptSource(script);
+  if (!safetyCheck.ok) {
+    return `Evaluate blocked: ${safetyCheck.reason}`;
+  }
+
   const tab = await getCurrentTab();
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id! },
-    func: (code: string, sel?: string) => {
+    func: async (code: string, sel?: string) => {
       try {
         let element: HTMLElement | null = null;
         if (sel) {
@@ -1032,13 +1071,46 @@ async function evaluateScript(
           }
         }
 
-        // Create function and execute
-        const fn = new Function("element", code);
-        const result = fn(element);
+        const source = code.trim();
+        const blockedPattern =
+          /\b(fetch|xmlhttprequest|websocket|eventsource|sendbeacon|localstorage|sessionstorage|indexeddb|document\.cookie|chrome\.|browser\.|eval\(|function\s*\(|import\s|window\.location|location\.)/i;
+        if (blockedPattern.test(source)) {
+          return {
+            success: false,
+            error: "Eval blocked: Script contains blocked tokens for safety",
+          };
+        }
+
+        const executeSource = (value: string, target: HTMLElement | null) => {
+          const looksLikeArrow = /=>/.test(value);
+
+          if (looksLikeArrow) {
+            const fn = new Function("element", `return (${value})(element);`);
+            return fn(target);
+          }
+
+          const expressionFn = new Function("element", `return (${value});`);
+          return expressionFn(target);
+        };
+
+        const rawResult = executeSource(source, element);
+        const result =
+          rawResult && typeof (rawResult as Promise<unknown>).then === "function"
+            ? await (rawResult as Promise<unknown>)
+            : rawResult;
+
+        let serialized = "undefined";
+        if (result !== undefined) {
+          try {
+            serialized = JSON.stringify(result) ?? String(result);
+          } catch {
+            serialized = String(result);
+          }
+        }
 
         return {
           success: true,
-          message: `Evaluated: ${JSON.stringify(result) ?? "undefined"}`,
+          message: `Evaluated: ${serialized}`,
         };
       } catch (error) {
         return {
@@ -1508,9 +1580,22 @@ function parseAction(type: string, params?: string): BrowserAction | null {
       }
       const firstComma = trimmedParams.indexOf(",");
       if (firstComma > 0) {
-        const selector = trimmedParams.substring(0, firstComma).trim();
+        const possibleSelector = trimmedParams.substring(0, firstComma).trim();
         const script = trimmedParams.substring(firstComma + 1).trim();
-        return script ? { type: "evaluate", selector, script } : null;
+
+        const selectorByPrefix =
+          /^ref:\s*e\d+$/i.test(possibleSelector) ||
+          /^e\d+$/i.test(possibleSelector) ||
+          /^[#.\[]/.test(possibleSelector);
+
+        const selectorByTagLike =
+          /^[a-z][a-z0-9:_-]*(?:\s*[>+~]\s*.*)?$/i.test(possibleSelector) &&
+          /=>|\belement\b|\breturn\b|[;{}()]/.test(script);
+
+        const looksLikeSelector = selectorByPrefix || selectorByTagLike;
+        if (looksLikeSelector && script) {
+          return { type: "evaluate", selector: possibleSelector, script };
+        }
       }
       return { type: "evaluate", script: trimmedParams };
     }
@@ -1564,17 +1649,45 @@ export interface FileActionResult {
 export function parseFileActionsFromResponse(response: string): FileAction[] {
   const actions: FileAction[] = [];
 
-  // Look for file blocks in format: [FILE: action, path, content]
-  const fileRegex = /\[FILE:\s*(create|append),\s*([^,\]]+),\s*([\s\S]*?)\]/gi;
-  let match;
+  let i = 0;
+  while (i < response.length) {
+    const fileStart = response.indexOf("[FILE:", i);
+    if (fileStart === -1) break;
 
-  while ((match = fileRegex.exec(response)) !== null) {
-    const [, actionType, path, content] = match;
-    actions.push({
-      type: actionType.toLowerCase() as "create" | "append",
-      path: path.trim(),
-      content: content.trim(),
-    });
+    let depth = 1;
+    let j = fileStart + 6;
+    while (j < response.length && depth > 0) {
+      if (response[j] === "[") depth++;
+      else if (response[j] === "]") depth--;
+      j++;
+    }
+
+    if (depth === 0) {
+      const fileContent = response.substring(fileStart + 6, j - 1).trim();
+      const firstComma = fileContent.indexOf(",");
+      const secondComma =
+        firstComma >= 0 ? fileContent.indexOf(",", firstComma + 1) : -1;
+
+      if (firstComma > 0 && secondComma > firstComma) {
+        const actionType = fileContent.substring(0, firstComma).trim();
+        const path = fileContent.substring(firstComma + 1, secondComma).trim();
+        const content = fileContent.substring(secondComma + 1).trim();
+
+        const normalizedAction = actionType.toLowerCase();
+        if (
+          (normalizedAction === "create" || normalizedAction === "append") &&
+          path
+        ) {
+          actions.push({
+            type: normalizedAction as "create" | "append",
+            path,
+            content,
+          });
+        }
+      }
+    }
+
+    i = j;
   }
 
   return actions;
@@ -2075,12 +2188,31 @@ export async function executeViaPlaywright(
   try {
     const response = await fetch("http://localhost:3210/playwright", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...BRIDGE_CLIENT_HEADERS,
+      },
       body: JSON.stringify({ action, params }),
     });
 
     if (!response.ok) {
-      return `Playwright error: ${response.status} ${response.statusText}`;
+      let detail = response.statusText;
+      try {
+        const errorPayload = (await response.json()) as { error?: unknown };
+        if (
+          errorPayload &&
+          typeof errorPayload.error === "string" &&
+          errorPayload.error.trim().length > 0
+        ) {
+          detail = errorPayload.error;
+        }
+      } catch {
+        // ignore json parse error and fallback to status text
+      }
+
+      return detail
+        ? `Playwright error: ${response.status} - ${detail}`
+        : `Playwright error: ${response.status}`;
     }
 
     const result = await response.json();
@@ -2099,6 +2231,7 @@ export async function checkPlaywrightAvailable(): Promise<boolean> {
   try {
     const response = await fetch("http://localhost:3210/playwright/status", {
       method: "GET",
+      headers: BRIDGE_CLIENT_HEADERS,
     });
     const result = await response.json();
     playwrightAvailable = result.available === true;

@@ -28,6 +28,86 @@ const DEFAULT_SETTINGS: LLMSettings = {
   },
 };
 
+const BRIDGE_CLIENT_HEADERS = {
+  "X-Copilot-Bridge-Client": "chrome-extension",
+} as const;
+
+const DEFAULT_AGENT_LOOPS = 500;
+const MIN_AGENT_LOOPS = 1;
+const MAX_AGENT_LOOPS = 1000;
+
+function clampAgentLoops(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_AGENT_LOOPS;
+  }
+  return Math.min(
+    MAX_AGENT_LOOPS,
+    Math.max(MIN_AGENT_LOOPS, Math.round(value)),
+  );
+}
+
+function isLanguage(value: unknown): value is Language {
+  return value === "ja" || value === "en";
+}
+
+function isOperationMode(value: unknown): value is OperationMode {
+  return value === "text" || value === "hybrid" || value === "screenshot";
+}
+
+function isValidLlmSettings(value: unknown): value is LLMSettings {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<LLMSettings>;
+  if (
+    candidate.provider !== "copilot" &&
+    candidate.provider !== "copilot-agent" &&
+    candidate.provider !== "lm-studio"
+  ) {
+    return false;
+  }
+
+  if (
+    !candidate.copilot ||
+    typeof candidate.copilot.model !== "string" ||
+    !candidate.lmStudio ||
+    typeof candidate.lmStudio.endpoint !== "string" ||
+    typeof candidate.lmStudio.model !== "string"
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+type PendingAction =
+  | {
+      type: "question";
+      text: string;
+    }
+  | {
+      type: "summarize";
+    };
+
+function toPendingPrompt(action: unknown, lang: Language): string | null {
+  if (!action || typeof action !== "object") {
+    return null;
+  }
+
+  const candidate = action as Partial<PendingAction>;
+  if (candidate.type === "question" && typeof candidate.text === "string") {
+    const text = candidate.text.trim();
+    return text.length > 0 ? text : null;
+  }
+
+  if (candidate.type === "summarize") {
+    return lang === "ja" ? "このページを要約して" : "Summarize this page";
+  }
+
+  return null;
+}
+
 export default function App() {
   const [settings, setSettings] = useState<LLMSettings>(DEFAULT_SETTINGS);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -38,10 +118,13 @@ export default function App() {
   const [browserActionsEnabled, setBrowserActionsEnabled] = useState(true);
   const [fileOperationsEnabled, setFileOperationsEnabled] = useState(true);
   const [language, setLanguage] = useState<Language>("ja");
-  const [maxAgentLoops, setMaxAgentLoops] = useState(500);
+  const [maxAgentLoops, setMaxAgentLoops] = useState(DEFAULT_AGENT_LOOPS);
   const [operationMode, setOperationMode] = useState<OperationMode>("text");
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const screenshotPermissionWarnedRef = useRef(false);
+  const settingsLoadedRef = useRef(false);
+  const pendingPromptDispatchRef = useRef<string | null>(null);
 
   // Load settings from storage
   useEffect(() => {
@@ -53,6 +136,7 @@ export default function App() {
         "language",
         "maxAgentLoops",
         "operationMode",
+        "pendingAction",
       ],
       (result: {
         llmSettings?: LLMSettings;
@@ -61,8 +145,9 @@ export default function App() {
         language?: Language;
         maxAgentLoops?: number;
         operationMode?: OperationMode;
+        pendingAction?: PendingAction;
       }) => {
-        if (result.llmSettings) {
+        if (isValidLlmSettings(result.llmSettings)) {
           setSettings(result.llmSettings);
         }
         if (result.browserActionsEnabled !== undefined) {
@@ -71,15 +156,28 @@ export default function App() {
         if (result.fileOperationsEnabled !== undefined) {
           setFileOperationsEnabled(result.fileOperationsEnabled);
         }
-        if (result.language) {
+        if (isLanguage(result.language)) {
           setLanguage(result.language);
         }
         if (result.maxAgentLoops !== undefined) {
-          setMaxAgentLoops(result.maxAgentLoops);
+          setMaxAgentLoops(clampAgentLoops(result.maxAgentLoops));
         }
-        if (result.operationMode) {
+        if (isOperationMode(result.operationMode)) {
           setOperationMode(result.operationMode);
         }
+
+        const effectiveLanguage = isLanguage(result.language)
+          ? result.language
+          : language;
+        const nextPendingPrompt = toPendingPrompt(
+          result.pendingAction,
+          effectiveLanguage,
+        );
+        if (nextPendingPrompt) {
+          setPendingPrompt(nextPendingPrompt);
+        }
+
+        settingsLoadedRef.current = true;
       },
     );
     checkConnection();
@@ -87,6 +185,10 @@ export default function App() {
 
   // Save settings to storage
   useEffect(() => {
+    if (!settingsLoadedRef.current) {
+      return;
+    }
+
     chrome.storage.local.set({
       llmSettings: settings,
       browserActionsEnabled,
@@ -107,7 +209,9 @@ export default function App() {
   const checkConnection = async () => {
     console.log("checkConnection called");
     try {
-      const response = await fetch("http://localhost:3210/health");
+      const response = await fetch("http://localhost:3210/health", {
+        headers: BRIDGE_CLIENT_HEADERS,
+      });
       const connected = response.ok;
       console.log("Connection status:", connected);
       setIsConnected(connected);
@@ -122,7 +226,9 @@ export default function App() {
 
   const fetchAvailableModels = async () => {
     try {
-      const response = await fetch("http://localhost:3210/models");
+      const response = await fetch("http://localhost:3210/models", {
+        headers: BRIDGE_CLIENT_HEADERS,
+      });
       if (response.ok) {
         const models = await response.json();
         setAvailableModels(models);
@@ -144,8 +250,7 @@ export default function App() {
         ...prev,
         {
           role: "assistant",
-          content:
-            "⚠️ スクリーンショット権限が未付与です。拡張機能アイコンを一度クリックするか、権限変更後は拡張を削除→再インストールしてください。",
+          content: t("screenshotPermissionWarning", language),
         },
       ]);
     }
@@ -571,7 +676,10 @@ export default function App() {
       // Send to VS Code extension
       const response = await fetch("http://localhost:3210/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...BRIDGE_CLIENT_HEADERS,
+        },
         body: JSON.stringify({
           settings,
           messages: [...messages, newUserMessage],
@@ -588,19 +696,26 @@ export default function App() {
 
       // Handle streaming response
       const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("Empty response stream from server");
+      }
       const decoder = new TextDecoder();
       let assistantMessage = "";
+      const assistantResponsesForFileActions: string[] = [];
 
       setMessages((prev: ChatMessage[]) => [
         ...prev,
         { role: "assistant", content: "" },
       ]);
 
-      while (reader) {
+      while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          assistantMessage += decoder.decode();
+          break;
+        }
 
-        const chunk = decoder.decode(value);
+        const chunk = decoder.decode(value, { stream: true });
         assistantMessage += chunk;
 
         setMessages((prev: ChatMessage[]) => {
@@ -613,12 +728,35 @@ export default function App() {
         });
       }
 
+      if (!assistantMessage.trim()) {
+        const emptyMessage = t("emptyServerResponse", language);
+        setMessages((prev: ChatMessage[]) => {
+          const newMessages = [...prev];
+          if (
+            newMessages.length > 0 &&
+            newMessages[newMessages.length - 1].role === "assistant" &&
+            !newMessages[newMessages.length - 1].content.trim()
+          ) {
+            newMessages[newMessages.length - 1] = {
+              role: "assistant",
+              content: emptyMessage,
+            };
+            return newMessages;
+          }
+          return [...newMessages, { role: "assistant", content: emptyMessage }];
+        });
+        return;
+      }
+
+      assistantResponsesForFileActions.push(assistantMessage);
+
       // Execute browser actions if enabled (with autonomous loop)
       console.log("[Agent] browserActionsEnabled:", browserActionsEnabled);
       console.log("[Agent] Provider:", settings.provider);
       console.log("[Agent] Initial response length:", assistantMessage.length);
 
       if (browserActionsEnabled) {
+        const safeMaxAgentLoops = clampAgentLoops(maxAgentLoops);
         let currentResponse = assistantMessage;
         let loopCount = 0;
         let conversationHistory = [
@@ -629,13 +767,13 @@ export default function App() {
 
         console.log(
           "[Agent] Starting autonomous loop, maxLoops:",
-          maxAgentLoops,
+          safeMaxAgentLoops,
         );
         let consecutiveErrors = 0;
         let useScreenshotFallback = operationMode === "screenshot";
 
         while (
-          loopCount < maxAgentLoops &&
+          loopCount < safeMaxAgentLoops &&
           !abortControllerRef.current?.signal.aborted
         ) {
           const actions = parseActionsFromResponse(currentResponse);
@@ -724,7 +862,7 @@ export default function App() {
             consecutiveErrors = 0;
           }
 
-          const resultMessage = `🤖 [Loop ${loopCount}/${maxAgentLoops}] ${t("executionResult", language)}\n${actionResults.join("\n")}`;
+          const resultMessage = `🤖 [Loop ${loopCount}/${safeMaxAgentLoops}] ${t("executionResult", language)}\n${actionResults.join("\n")}`;
           setMessages((prev: ChatMessage[]) => [
             ...prev,
             { role: "assistant", content: resultMessage },
@@ -788,7 +926,10 @@ export default function App() {
           try {
             const continueResponse = await fetch("http://localhost:3210/chat", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                ...BRIDGE_CLIENT_HEADERS,
+              },
               body: JSON.stringify({
                 settings,
                 messages: conversationHistory,
@@ -807,18 +948,26 @@ export default function App() {
             }
 
             const continueReader = continueResponse.body?.getReader();
+            if (!continueReader) {
+              console.error("Continue response has no stream body");
+              break;
+            }
             currentResponse = "";
+            const continueDecoder = new TextDecoder();
 
             setMessages((prev: ChatMessage[]) => [
               ...prev,
               { role: "assistant", content: "" },
             ]);
 
-            while (continueReader) {
+            while (true) {
               const { done, value } = await continueReader.read();
-              if (done) break;
+              if (done) {
+                currentResponse += continueDecoder.decode();
+                break;
+              }
 
-              const chunk = decoder.decode(value);
+              const chunk = continueDecoder.decode(value, { stream: true });
               currentResponse += chunk;
 
               setMessages((prev: ChatMessage[]) => {
@@ -831,11 +980,37 @@ export default function App() {
               });
             }
 
+            if (!currentResponse.trim()) {
+              setMessages((prev: ChatMessage[]) => {
+                const newMessages = [...prev];
+                if (
+                  newMessages.length > 0 &&
+                  newMessages[newMessages.length - 1].role === "assistant" &&
+                  !newMessages[newMessages.length - 1].content.trim()
+                ) {
+                  newMessages[newMessages.length - 1] = {
+                    role: "assistant",
+                    content: t("emptyContinuationResponse", language),
+                  };
+                  return newMessages;
+                }
+                return [
+                  ...newMessages,
+                  {
+                    role: "assistant",
+                    content: t("emptyContinuationResponse", language),
+                  },
+                ];
+              });
+              break;
+            }
+
             // Add LLM response to conversation history
             conversationHistory = [
               ...conversationHistory,
               { role: "assistant" as const, content: currentResponse },
             ];
+            assistantResponsesForFileActions.push(currentResponse);
           } catch (error) {
             if (error instanceof Error && error.name === "AbortError") {
               console.log("Autonomous loop cancelled by user");
@@ -846,12 +1021,15 @@ export default function App() {
           }
         }
 
-        if (loopCount >= maxAgentLoops) {
+        if (loopCount >= safeMaxAgentLoops) {
           setMessages((prev: ChatMessage[]) => [
             ...prev,
             {
               role: "assistant",
-              content: `⚠️ 最大ループ回数 (${maxAgentLoops}) に達しました。`,
+              content: t("maxAgentLoopsReached", language).replace(
+                "{count}",
+                String(safeMaxAgentLoops),
+              ),
             },
           ]);
         }
@@ -860,6 +1038,7 @@ export default function App() {
       // Execute file actions if enabled
       if (fileOperationsEnabled) {
         const downloadResults: string[] = [];
+        const processedFileMarkers = new Set<string>();
 
         const decodeBase64Utf8 = (b64: string) => {
           const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
@@ -869,19 +1048,53 @@ export default function App() {
         // Pattern 1: New base64 download marker from VS Code agent tool
         const downloadRegex =
           /__DOWNLOAD_FILE__:([^:]+):([A-Za-z0-9+/=]+):__END_DOWNLOAD__/g;
-        let dlMatch;
-        while ((dlMatch = downloadRegex.exec(assistantMessage)) !== null) {
-          const [, filePath, b64Content] = dlMatch;
-          try {
-            const content = decodeBase64Utf8(b64Content);
-            const filename = filePath
-              .replace(/^[\/\\]+/, "")
-              .replace(/[\/\\]/g, "_");
-            const result = await executeFileAction({
-              type: "create",
-              path: filename,
-              content,
-            });
+
+        for (const responseText of assistantResponsesForFileActions) {
+          let dlMatch;
+          while ((dlMatch = downloadRegex.exec(responseText)) !== null) {
+            const [, filePath, b64Content] = dlMatch;
+            const markerKey = `b64:${filePath}:${b64Content}`;
+            if (processedFileMarkers.has(markerKey)) {
+              continue;
+            }
+            processedFileMarkers.add(markerKey);
+
+            try {
+              const content = decodeBase64Utf8(b64Content);
+              const filename = filePath
+                .replace(/^[\/\\]+/, "")
+                .replace(/[\/\\]/g, "_");
+              const result = await executeFileAction({
+                type: "create",
+                path: filename,
+                content,
+              });
+              if (result.success) {
+                const showLink = result.downloadId
+                  ? ` ([フォルダで表示](download-show:${result.downloadId}))`
+                  : "";
+                downloadResults.push(`• ✓ ${result.filename}${showLink}`);
+              } else {
+                downloadResults.push(
+                  `• ✗ ${result.filename}: ${result.error || "ダウンロードに失敗しました"}`,
+                );
+              }
+            } catch {
+              downloadResults.push(`• ✗ Base64デコードエラー: ${filePath}`);
+            }
+          }
+          downloadRegex.lastIndex = 0;
+
+          // Pattern 2: Legacy [FILE: create, ...] pattern
+          const fileActions = parseFileActionsFromResponse(responseText);
+          for (const action of fileActions) {
+            const markerKey = `file:${action.type}:${action.path}:${action.content}`;
+            if (processedFileMarkers.has(markerKey)) {
+              continue;
+            }
+            processedFileMarkers.add(markerKey);
+
+            const result = await executeFileAction(action);
             if (result.success) {
               const showLink = result.downloadId
                 ? ` ([フォルダで表示](download-show:${result.downloadId}))`
@@ -892,26 +1105,6 @@ export default function App() {
                 `• ✗ ${result.filename}: ${result.error || "ダウンロードに失敗しました"}`,
               );
             }
-          } catch (e) {
-            downloadResults.push(
-              `• \u2717 Base64\u30c7\u30b3\u30fc\u30c9\u30a8\u30e9\u30fc: ${filePath}`,
-            );
-          }
-        }
-
-        // Pattern 2: Legacy [FILE: create, ...] pattern
-        const fileActions = parseFileActionsFromResponse(assistantMessage);
-        for (const action of fileActions) {
-          const result = await executeFileAction(action);
-          if (result.success) {
-            const showLink = result.downloadId
-              ? ` ([フォルダで表示](download-show:${result.downloadId}))`
-              : "";
-            downloadResults.push(`• ✓ ${result.filename}${showLink}`);
-          } else {
-            downloadResults.push(
-              `• ✗ ${result.filename}: ${result.error || "ダウンロードに失敗しました"}`,
-            );
           }
         }
 
@@ -945,6 +1138,26 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (isLoading || !pendingPrompt) {
+      return;
+    }
+
+    if (pendingPromptDispatchRef.current === pendingPrompt) {
+      return;
+    }
+
+    const prompt = pendingPrompt;
+    pendingPromptDispatchRef.current = prompt;
+    setPendingPrompt(null);
+    chrome.storage.local.remove("pendingAction");
+    void sendMessage(prompt).finally(() => {
+      if (pendingPromptDispatchRef.current === prompt) {
+        pendingPromptDispatchRef.current = null;
+      }
+    });
+  }, [isLoading, pendingPrompt]);
+
   const stopGeneration = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -956,7 +1169,9 @@ export default function App() {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 bg-white border-b">
         <div className="flex items-center gap-2">
-          <span className="text-lg font-semibold">🤖 Copilot Bridge</span>
+          <span className="text-lg font-semibold">
+            {t("appTitle", language)}
+          </span>
           <span
             className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
           />
@@ -965,7 +1180,7 @@ export default function App() {
           <button
             onClick={checkConnection}
             className="p-2 hover:bg-gray-100 rounded"
-            title="再接続"
+            title={t("reconnect", language)}
           >
             🔄
           </button>

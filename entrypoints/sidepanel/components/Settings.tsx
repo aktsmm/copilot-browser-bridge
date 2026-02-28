@@ -59,6 +59,18 @@ const ALLOWED_FAMILIES = [
   "gemini-pro",
 ];
 
+const MIN_AGENT_LOOPS = 1;
+const MAX_AGENT_LOOPS = 1000;
+const DEFAULT_AGENT_LOOPS = 500;
+
+function normalizeAgentLoops(raw: string): number {
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_AGENT_LOOPS;
+  }
+  return Math.min(MAX_AGENT_LOOPS, Math.max(MIN_AGENT_LOOPS, parsed));
+}
+
 export function Settings({
   settings,
   onSettingsChange,
@@ -152,13 +164,13 @@ export function Settings({
         <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
             <label className="block text-sm font-medium text-gray-700">
-              モデル
+              {t("model", language)}
             </label>
             <button
               onClick={onRefreshModels}
               className="text-xs text-blue-600 hover:underline"
             >
-              🔄 更新
+              {t("refresh", language)}
             </button>
           </div>
           <select
@@ -183,7 +195,7 @@ export function Settings({
           </select>
           {copilotModels.length === 0 && (
             <p className="text-xs text-gray-500 mt-1">
-              ※ VS Code未接続のため既定モデル表示中
+              {t("modelNotConnected", language)}
             </p>
           )}
         </div>
@@ -194,7 +206,7 @@ export function Settings({
         <>
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              エンドポイント
+              {t("endpoint", language)}
             </label>
             <input
               type="text"
@@ -211,7 +223,7 @@ export function Settings({
           </div>
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              モデル名 (空欄で自動検出)
+              {t("modelName", language)}
             </label>
             <input
               type="text"
@@ -300,9 +312,7 @@ export function Settings({
             min={1}
             max={1000}
             value={maxAgentLoops}
-            onChange={(e) =>
-              onMaxAgentLoopsChange(parseInt(e.target.value) || 500)
-            }
+            onChange={(e) => onMaxAgentLoopsChange(normalizeAgentLoops(e.target.value))}
             className="w-full p-2 border rounded"
             aria-label={
               language === "ja" ? "最大ループ回数" : "Max Agent Loops"

@@ -23,6 +23,14 @@ export const translations = {
     executionResult: "🤖 実行結果:",
     copy: "コピー",
     copied: "コピー済み",
+    screenshotPermissionWarning:
+      "⚠️ スクリーンショット権限が未付与です。拡張機能アイコンを一度クリックするか、権限変更後は拡張を削除→再インストールしてください。",
+    emptyServerResponse:
+      "⚠️ サーバーから空の応答が返されました。もう一度お試しください。",
+    emptyContinuationResponse:
+      "⚠️ 続行応答が空だったため、自律実行を停止しました。",
+    maxAgentLoopsReached:
+      "⚠️ 最大ループ回数 ({count}) に達したため、自律実行を停止しました。",
 
     // Settings
     settingsTitle: "設定",
@@ -60,6 +68,14 @@ export const translations = {
     executionResult: "🤖 Execution Result:",
     copy: "Copy",
     copied: "Copied",
+    screenshotPermissionWarning:
+      "⚠️ Screenshot permission is not granted. Click the extension icon once, or reinstall the extension after changing permissions.",
+    emptyServerResponse:
+      "⚠️ Server returned an empty response. Please try again.",
+    emptyContinuationResponse:
+      "⚠️ Continuation response was empty, so autonomous execution was stopped.",
+    maxAgentLoopsReached:
+      "⚠️ Reached maximum loop count ({count}), so autonomous execution was stopped.",
 
     // Settings
     settingsTitle: "Settings",
@@ -78,5 +94,6 @@ export const translations = {
 };
 
 export function t(key: keyof typeof translations.ja, lang: Language): string {
-  return translations[lang][key];
+  const dictionary = lang === "ja" || lang === "en" ? translations[lang] : translations.en;
+  return dictionary[key];
 }

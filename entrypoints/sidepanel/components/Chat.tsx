@@ -1,25 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import type { ChatMessage } from "../types";
 import type { Language } from "../i18n";
 import { t } from "../i18n";
-
-const markdownSanitizeSchema = {
-  ...defaultSchema,
-  tagNames: Array.from(
-    new Set([...(defaultSchema.tagNames ?? []), "details", "summary"]),
-  ),
-  attributes: {
-    ...(defaultSchema.attributes ?? {}),
-    // Allow summary content; keep everything else default
-    summary: ["className"],
-    details: ["open", "className"],
-    a: ["href", "title", ...(defaultSchema.attributes?.a ?? [])],
-  },
-};
 
 type QuickAction = {
   icon: string;
@@ -27,7 +11,7 @@ type QuickAction = {
   prompt: string;
 };
 
-// Collapse tool execution logs into <details> blocks
+// Collapse tool execution logs into compact markdown blocks
 function collapseToolLogs(content: string): string {
   // Remove download markers (already processed by App.tsx)
   let cleaned = content.replace(
@@ -43,7 +27,7 @@ function collapseToolLogs(content: string): string {
         .trim()
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
-      return `\n<details><summary>🔧 ${toolName.trim()}</summary>\n\n\`\`\`\n${escapedResult}\n\`\`\`\n\n</details>\n\n`;
+      return `\n#### 🔧 ${toolName.trim()}\n\n\`\`\`\n${escapedResult}\n\`\`\`\n\n`;
     },
   );
 
@@ -280,10 +264,6 @@ export function Chat({
                 {message.role === "assistant" ? (
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[
-                      rehypeRaw,
-                      [rehypeSanitize, markdownSanitizeSchema],
-                    ]}
                     components={{
                       a: ({ href, children, ...props }) => {
                         const safeHref = href || "";
@@ -302,7 +282,12 @@ export function Chat({
                           );
                         }
                         return (
-                          <a href={safeHref} {...props}>
+                          <a
+                            href={safeHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            {...props}
+                          >
                             {children}
                           </a>
                         );

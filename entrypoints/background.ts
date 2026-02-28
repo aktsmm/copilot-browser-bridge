@@ -67,7 +67,21 @@ export default defineBackground({
       ) => {
         if (message.type === "download-file") {
           const { filename, content, mimeType } = message;
-          const dataUrl = `data:${mimeType || "text/plain;charset=utf-8"};base64,${btoa(unescape(encodeURIComponent(content || "")))}`;
+
+          const encodeUtf8ToBase64 = (value: string): string => {
+            const bytes = new TextEncoder().encode(value);
+            let binary = "";
+            const chunkSize = 0x8000;
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+              binary += String.fromCharCode(
+                ...bytes.subarray(i, i + chunkSize),
+              );
+            }
+            return btoa(binary);
+          };
+
+          const encodedContent = encodeUtf8ToBase64(content || "");
+          const dataUrl = `data:${mimeType || "text/plain;charset=utf-8"};base64,${encodedContent}`;
           browser.downloads.download(
             {
               url: dataUrl,

@@ -1,6 +1,6 @@
 # Copilot Browser Bridge (Chrome Extension)
 
-[![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-審査中-orange?logo=google-chrome)](https://chrome.google.com/webstore)
+[![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-live-brightgreen?logo=google-chrome)](https://chromewebstore.google.com/detail/copilot-browser-bridge/nggfpdadfepkbpjfnpcihagbnnfpeian)
 [![License CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](LICENSE)
 [![GitHub](https://img.shields.io/github/stars/aktsmm/copilot-browser-bridge?style=social)](https://github.com/aktsmm/copilot-browser-bridge)
 
@@ -31,7 +31,7 @@
 
 ### Chrome Web Store
 
-🔄 審査中 - Coming soon!
+✅ 公開中: [Chrome Web Store からインストール](https://chromewebstore.google.com/detail/copilot-browser-bridge/nggfpdadfepkbpjfnpcihagbnnfpeian)
 
 ## 📋 必要条件
 
@@ -78,7 +78,7 @@ npm run zip
 
 CC BY-NC-SA 4.0 © [aktsmm](https://github.com/aktsmm)
 
-## � プライバシーポリシー
+## 🔒 プライバシーポリシー
 
 この拡張機能は、ユーザーのプライバシーを尊重します。
 
@@ -105,7 +105,7 @@ CC BY-NC-SA 4.0 © [aktsmm](https://github.com/aktsmm)
 - **GitHub Copilot使用時**: ページ内容がGitHub/OpenAIのサーバーに送信されます
 - **ローカルLLM使用時**: すべてのデータはローカルで処理され、外部に送信されません
 
-## �🔗 関連プロジェクト
+## 🔗 関連プロジェクト
 
 - [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) - 必須のVS Code拡張機能
 
