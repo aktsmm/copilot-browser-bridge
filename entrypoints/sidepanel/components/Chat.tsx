@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeSanitize from "rehype-sanitize";
 import type { ChatMessage } from "../types";
 import type { Language } from "../i18n";
 import { t } from "../i18n";
@@ -19,9 +20,9 @@ function collapseToolLogs(content: string): string {
     "",
   );
 
-  // Pattern: 🔧 ツール実行: {name}\n📋 結果: {result}
+  // Pattern: 🔧 ツール実行|Tool Execution: {name}\n📋 結果|Result: {result}
   cleaned = cleaned.replace(
-    /\n*🔧 ツール実行: ([^\n]+)\n📋 結果: ([^\n]*(?:\n(?!🔧|\[Agent|##|\n\n)[^\n]*)*)\n*/g,
+    /\n*🔧 (?:ツール実行|Tool Execution): ([^\n]+)\n📋 (?:結果|Result): ([^\n]*(?:\n(?!🔧|\[Agent|##|\n\n)[^\n]*)*)\n*/g,
     (_, toolName, result) => {
       const escapedResult = result
         .trim()
@@ -96,9 +97,13 @@ export function Chat({
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const handleCopy = async (text: string, index: number) => {
-    await navigator.clipboard.writeText(text);
-    setCopiedIndex(index);
-    setTimeout(() => setCopiedIndex(null), 2000);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    } catch (error) {
+      console.error("Failed to copy message", error);
+    }
   };
 
   useEffect(() => {
@@ -264,6 +269,7 @@ export function Chat({
                 {message.role === "assistant" ? (
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeSanitize]}
                     components={{
                       a: ({ href, children, ...props }) => {
                         const safeHref = href || "";

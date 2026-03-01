@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ModelInfo,
   OperationMode,
+  BrowserAction,
 } from "./types";
 import {
   executeBrowserAction,
@@ -13,12 +14,15 @@ import {
   parseFileActionsFromResponse,
   executeFileAction,
   captureScreenshot,
+  setEvaluateActionEnabled,
 } from "./browser-actions";
 import type { Language } from "./i18n";
 import { t } from "./i18n";
+import { BRIDGE_CLIENT_HEADERS } from "./constants";
+import { DEFAULT_SERVER_PORT, normalizeServerPort } from "./server-port";
 
 const DEFAULT_SETTINGS: LLMSettings = {
-  provider: "copilot",
+  provider: "copilot-agent",
   copilot: {
     model: "gpt-4o",
   },
@@ -27,10 +31,6 @@ const DEFAULT_SETTINGS: LLMSettings = {
     model: "",
   },
 };
-
-const BRIDGE_CLIENT_HEADERS = {
-  "X-Copilot-Bridge-Client": "chrome-extension",
-} as const;
 
 const DEFAULT_AGENT_LOOPS = 500;
 const MIN_AGENT_LOOPS = 1;
@@ -115,13 +115,16 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
-  const [browserActionsEnabled, setBrowserActionsEnabled] = useState(true);
+  const [browserActionsEnabled, setBrowserActionsEnabled] = useState(false);
   const [fileOperationsEnabled, setFileOperationsEnabled] = useState(true);
   const [language, setLanguage] = useState<Language>("ja");
   const [maxAgentLoops, setMaxAgentLoops] = useState(DEFAULT_AGENT_LOOPS);
-  const [operationMode, setOperationMode] = useState<OperationMode>("text");
+  const [operationMode, setOperationMode] = useState<OperationMode>("hybrid");
+  const [serverPort, setServerPort] = useState(DEFAULT_SERVER_PORT);
+  const [allowEvaluateAction, setAllowEvaluateAction] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const inFlightRequestRef = useRef(false);
   const screenshotPermissionWarnedRef = useRef(false);
   const settingsLoadedRef = useRef(false);
   const pendingPromptDispatchRef = useRef<string | null>(null);
@@ -136,6 +139,8 @@ export default function App() {
         "language",
         "maxAgentLoops",
         "operationMode",
+        "serverPort",
+        "allowEvaluateAction",
         "pendingAction",
       ],
       (result: {
@@ -145,8 +150,13 @@ export default function App() {
         language?: Language;
         maxAgentLoops?: number;
         operationMode?: OperationMode;
+        serverPort?: number;
+        allowEvaluateAction?: boolean;
         pendingAction?: PendingAction;
       }) => {
+        let effectiveServerPort = DEFAULT_SERVER_PORT;
+        let effectiveAllowEvaluateAction = false;
+
         if (isValidLlmSettings(result.llmSettings)) {
           setSettings(result.llmSettings);
         }
@@ -165,6 +175,16 @@ export default function App() {
         if (isOperationMode(result.operationMode)) {
           setOperationMode(result.operationMode);
         }
+        if (result.serverPort !== undefined) {
+          effectiveServerPort = normalizeServerPort(result.serverPort);
+          setServerPort(effectiveServerPort);
+        }
+        if (typeof result.allowEvaluateAction === "boolean") {
+          effectiveAllowEvaluateAction = result.allowEvaluateAction;
+          setAllowEvaluateAction(result.allowEvaluateAction);
+        }
+
+        setEvaluateActionEnabled(effectiveAllowEvaluateAction);
 
         const effectiveLanguage = isLanguage(result.language)
           ? result.language
@@ -178,9 +198,9 @@ export default function App() {
         }
 
         settingsLoadedRef.current = true;
+        void checkConnection(effectiveServerPort);
       },
     );
-    checkConnection();
   }, []);
 
   // Save settings to storage
@@ -196,6 +216,8 @@ export default function App() {
       language,
       maxAgentLoops,
       operationMode,
+      serverPort,
+      allowEvaluateAction,
     });
   }, [
     settings,
@@ -204,30 +226,49 @@ export default function App() {
     language,
     maxAgentLoops,
     operationMode,
+    serverPort,
+    allowEvaluateAction,
   ]);
 
-  const checkConnection = async () => {
+  useEffect(() => {
+    setEvaluateActionEnabled(allowEvaluateAction);
+  }, [allowEvaluateAction]);
+
+  const getBridgeBaseUrl = (overridePort?: number) => {
+    const targetPort = normalizeServerPort(overridePort ?? serverPort);
+    return `http://localhost:${targetPort}`;
+  };
+
+  const checkConnection = async (overridePort?: number) => {
     console.log("checkConnection called");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
     try {
-      const response = await fetch("http://localhost:3210/health", {
+      const response = await fetch(`${getBridgeBaseUrl(overridePort)}/health`, {
         headers: BRIDGE_CLIENT_HEADERS,
+        signal: controller.signal,
       });
       const connected = response.ok;
       console.log("Connection status:", connected);
       setIsConnected(connected);
       if (connected) {
-        fetchAvailableModels();
+        fetchAvailableModels(overridePort);
       }
     } catch (error) {
       console.log("Connection failed:", error);
       setIsConnected(false);
+    } finally {
+      clearTimeout(timeout);
     }
   };
 
-  const fetchAvailableModels = async () => {
+  const fetchAvailableModels = async (overridePort?: number) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
     try {
-      const response = await fetch("http://localhost:3210/models", {
+      const response = await fetch(`${getBridgeBaseUrl(overridePort)}/models`, {
         headers: BRIDGE_CLIENT_HEADERS,
+        signal: controller.signal,
       });
       if (response.ok) {
         const models = await response.json();
@@ -235,7 +276,16 @@ export default function App() {
       }
     } catch {
       console.error("Failed to fetch models");
+    } finally {
+      clearTimeout(timeout);
     }
+  };
+
+  const handleServerPortChange = (nextPort: number) => {
+    const normalizedPort = normalizeServerPort(nextPort);
+    setServerPort(normalizedPort);
+    chrome.storage.local.set({ serverPort: normalizedPort });
+    void checkConnection(normalizedPort);
   };
 
   const maybeWarnScreenshotPermission = (error: unknown) => {
@@ -274,7 +324,7 @@ export default function App() {
         tab.url.startsWith("about:") ||
         tab.url.startsWith("chrome-extension://")
       ) {
-        return `[システムページ: ${tab.url}] - このページの内容は取得できません`;
+        return t("systemPageUnsupported", language).replace("{url}", tab.url);
       }
 
       const mode = options?.mode ?? "interactive";
@@ -627,8 +677,50 @@ export default function App() {
     }
   };
 
+  const shouldRequireLoopApproval = (actions: BrowserAction[]): boolean => {
+    const highRiskActionTypes: ReadonlySet<BrowserAction["type"]> = new Set([
+      "navigate",
+      "newTab",
+      "closeTab",
+      "evaluate",
+      "playwright",
+      "upload",
+      "handleDialog",
+      "drag",
+      "clickXY",
+    ]);
+
+    return actions.some((action) => highRiskActionTypes.has(action.type));
+  };
+
+  const confirmActionExecution = (
+    actions: BrowserAction[],
+    loopNumber?: number,
+  ): boolean => {
+    if (actions.length === 0) {
+      return true;
+    }
+
+    const actionPreview = actions
+      .slice(0, 6)
+      .map((action, index) => `${index + 1}. ${action.type}`)
+      .join("\n");
+    const extraCount = actions.length > 6 ? `\n... +${actions.length - 6}` : "";
+    const loopLabel =
+      typeof loopNumber === "number"
+        ? language === "ja"
+          ? `\n(ループ ${loopNumber})`
+          : `\n(Loop ${loopNumber})`
+        : "";
+    const confirmationMessage = `${t("actionExecutionConfirm", language).replace("{count}", String(actions.length))}${loopLabel}\n\n${actionPreview}${extraCount}`;
+
+    return window.confirm(confirmationMessage);
+  };
+
   const sendMessage = async (userMessage: string) => {
-    if (!userMessage.trim() || isLoading) return;
+    if (!userMessage.trim() || isLoading || inFlightRequestRef.current) return;
+
+    inFlightRequestRef.current = true;
 
     const wantsContentOnly =
       /\b(translate|translation|summarize|summary)\b/i.test(userMessage) ||
@@ -674,7 +766,7 @@ export default function App() {
       }
 
       // Send to VS Code extension
-      const response = await fetch("http://localhost:3210/chat", {
+      const response = await fetch(`${getBridgeBaseUrl()}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -756,282 +848,326 @@ export default function App() {
       console.log("[Agent] Initial response length:", assistantMessage.length);
 
       if (browserActionsEnabled) {
-        const safeMaxAgentLoops = clampAgentLoops(maxAgentLoops);
-        let currentResponse = assistantMessage;
-        let loopCount = 0;
-        let conversationHistory = [
-          ...messages,
-          newUserMessage,
-          { role: "assistant" as const, content: assistantMessage },
-        ];
+        const initialActions = parseActionsFromResponse(assistantMessage);
+        let isActionExecutionApproved = true;
 
-        console.log(
-          "[Agent] Starting autonomous loop, maxLoops:",
-          safeMaxAgentLoops,
-        );
-        let consecutiveErrors = 0;
-        let useScreenshotFallback = operationMode === "screenshot";
+        if (initialActions.length > 0) {
+          isActionExecutionApproved = confirmActionExecution(initialActions);
 
-        while (
-          loopCount < safeMaxAgentLoops &&
-          !abortControllerRef.current?.signal.aborted
-        ) {
-          const actions = parseActionsFromResponse(currentResponse);
-          console.log(
-            `[Agent Loop] Loop ${loopCount}, Actions found: ${actions.length}`,
-            actions,
-          );
-          console.log(
-            `[Agent Loop] Current response:`,
-            currentResponse.slice(0, 200),
-          );
-
-          // Check if response indicates completion (only when NO actions found)
-          if (actions.length === 0) {
-            // No actions to execute - check if truly done or just needs prompting
-            const isCompletion = (() => {
-              const lower = currentResponse.toLowerCase();
-              // Very strict: only final completion phrases, not mid-task reports
-              const jpFinal =
-                /(以上で完了|すべて完了|タスク完了|作業が完了|全て完了|完了です。$|完了しました。$)/;
-              const enFinal =
-                /\b(all done|task completed|finished all|completed successfully)\b/;
-              return jpFinal.test(currentResponse) || enFinal.test(lower);
-            })();
-
-            if (isCompletion) {
-              console.log("[Agent Loop] Completion detected, stopping loop");
-            } else {
-              console.log("[Agent Loop] No actions found, stopping loop");
-            }
-            break;
-          }
-
-          // Actions found - continue regardless of any "完了" in text
-
-          loopCount++;
-          const actionResults: string[] = [];
-          let errorCount = 0;
-
-          for (const action of actions) {
-            try {
-              // All modes now use improved local DOM operations
-              // (Playwright-style: auto-wait, multiple click methods, etc.)
-              const result = await executeBrowserAction(action);
-              console.log(`[Action] ${action.type} -> ${result}`);
-
-              actionResults.push(`• ${result}`);
-              if (
-                result.includes("not found") ||
-                result.includes("Error") ||
-                result.includes("error")
-              ) {
-                errorCount++;
-              }
-            } catch (error) {
-              actionResults.push(
-                `• Error: ${error instanceof Error ? error.message : String(error)}`,
-              );
-              errorCount++;
-            }
-
-            // Short delay between actions (80-200ms)
-            await new Promise((resolve) =>
-              setTimeout(resolve, 80 + Math.random() * 120),
-            );
-          }
-
-          // Track consecutive errors for hybrid mode fallback
-          if (errorCount > 0) {
-            consecutiveErrors++;
-            // In hybrid mode, switch to screenshot after 3 consecutive errors
-            if (
-              operationMode === "hybrid" &&
-              consecutiveErrors >= 3 &&
-              !useScreenshotFallback
-            ) {
-              console.log(
-                "[Agent] Hybrid mode: switching to screenshot fallback after 3 consecutive errors",
-              );
-              useScreenshotFallback = true;
-              actionResults.push(
-                "📸 Switching to screenshot mode for better accuracy",
-              );
-            }
-          } else {
-            consecutiveErrors = 0;
-          }
-
-          const resultMessage = `🤖 [Loop ${loopCount}/${safeMaxAgentLoops}] ${t("executionResult", language)}\n${actionResults.join("\n")}`;
-          setMessages((prev: ChatMessage[]) => [
-            ...prev,
-            { role: "assistant", content: resultMessage },
-          ]);
-
-          // Only continue autonomous loop in agent mode
-          // For chat mode, stop after first execution (user can click "つづけて" to continue)
-          if (settings.provider !== "copilot-agent") {
-            console.log(
-              "[Agent] Chat mode - stopping after first action. Use Agent mode for autonomous loop.",
-            );
-            break;
-          }
-
-          console.log("[Agent] Agent mode - continuing autonomous loop...");
-
-          // Short wait between loops (0.5-1.0 seconds)
-          const waitTime = 500 + Math.random() * 500;
-          console.log(
-            `[Agent] Waiting ${Math.round(waitTime / 1000)}s before next loop...`,
-          );
-          await new Promise((resolve) => setTimeout(resolve, waitTime));
-
-          // Get updated page content (with screenshot if in fallback mode)
-          let updatedPageContent = "";
-          let updatedScreenshot = "";
-
-          if (useScreenshotFallback) {
-            try {
-              updatedScreenshot = await captureScreenshot();
-              // Also get DOM elements for ref-based clicking
-              const domContent = await extractPageContent({
-                mode: "interactive",
-              });
-              updatedPageContent = `[Screenshot attached]\n\n${domContent}`;
-              console.log("[Agent] Screenshot captured for fallback mode");
-            } catch (e) {
-              console.error("Screenshot fallback failed:", e);
-              maybeWarnScreenshotPermission(e);
-              updatedPageContent = await extractPageContent({
-                mode: "interactive",
-              });
-            }
-          } else {
-            updatedPageContent = await extractPageContent({
-              mode: wantsContentOnly ? "content" : "interactive",
-              autoScrollForLazyLoad: wantsContentOnly && autoScrollForLazyLoad,
-            });
-          }
-
-          // Add results to conversation
-          conversationHistory = [
-            ...conversationHistory,
-            {
-              role: "user" as const,
-              content: `アクション実行結果 (Loop ${loopCount}):\n${actionResults.join("\n")}\n\n続けてください。エラーがあれば別の方法を試してください。完了したら「完了」と報告してください。`,
-            },
-          ];
-
-          // Request next action from LLM
-          try {
-            const continueResponse = await fetch("http://localhost:3210/chat", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...BRIDGE_CLIENT_HEADERS,
-              },
-              body: JSON.stringify({
-                settings,
-                messages: conversationHistory,
-                pageContent: updatedPageContent,
-                screenshot: updatedScreenshot || undefined,
-                operationMode: useScreenshotFallback
-                  ? "screenshot"
-                  : operationMode,
-              }),
-              signal: abortControllerRef.current?.signal,
-            });
-
-            if (!continueResponse.ok) {
-              console.error("Continue response failed");
-              break;
-            }
-
-            const continueReader = continueResponse.body?.getReader();
-            if (!continueReader) {
-              console.error("Continue response has no stream body");
-              break;
-            }
-            currentResponse = "";
-            const continueDecoder = new TextDecoder();
-
+          if (!isActionExecutionApproved) {
             setMessages((prev: ChatMessage[]) => [
               ...prev,
-              { role: "assistant", content: "" },
+              {
+                role: "assistant",
+                content: t("actionExecutionCancelled", language),
+              },
             ]);
-
-            while (true) {
-              const { done, value } = await continueReader.read();
-              if (done) {
-                currentResponse += continueDecoder.decode();
-                break;
-              }
-
-              const chunk = continueDecoder.decode(value, { stream: true });
-              currentResponse += chunk;
-
-              setMessages((prev: ChatMessage[]) => {
-                const newMessages = [...prev];
-                newMessages[newMessages.length - 1] = {
-                  role: "assistant",
-                  content: currentResponse,
-                };
-                return newMessages;
-              });
-            }
-
-            if (!currentResponse.trim()) {
-              setMessages((prev: ChatMessage[]) => {
-                const newMessages = [...prev];
-                if (
-                  newMessages.length > 0 &&
-                  newMessages[newMessages.length - 1].role === "assistant" &&
-                  !newMessages[newMessages.length - 1].content.trim()
-                ) {
-                  newMessages[newMessages.length - 1] = {
-                    role: "assistant",
-                    content: t("emptyContinuationResponse", language),
-                  };
-                  return newMessages;
-                }
-                return [
-                  ...newMessages,
-                  {
-                    role: "assistant",
-                    content: t("emptyContinuationResponse", language),
-                  },
-                ];
-              });
-              break;
-            }
-
-            // Add LLM response to conversation history
-            conversationHistory = [
-              ...conversationHistory,
-              { role: "assistant" as const, content: currentResponse },
-            ];
-            assistantResponsesForFileActions.push(currentResponse);
-          } catch (error) {
-            if (error instanceof Error && error.name === "AbortError") {
-              console.log("Autonomous loop cancelled by user");
-              break;
-            }
-            console.error("Error in autonomous loop:", error);
-            // Continue loop even on error
           }
         }
 
-        if (loopCount >= safeMaxAgentLoops) {
-          setMessages((prev: ChatMessage[]) => [
-            ...prev,
-            {
-              role: "assistant",
-              content: t("maxAgentLoopsReached", language).replace(
-                "{count}",
-                String(safeMaxAgentLoops),
-              ),
-            },
-          ]);
+        if (isActionExecutionApproved) {
+          const safeMaxAgentLoops = clampAgentLoops(maxAgentLoops);
+          let currentResponse = assistantMessage;
+          let loopCount = 0;
+          let conversationHistory = [
+            ...messages,
+            newUserMessage,
+            { role: "assistant" as const, content: assistantMessage },
+          ];
+
+          console.log(
+            "[Agent] Starting autonomous loop, maxLoops:",
+            safeMaxAgentLoops,
+          );
+          let consecutiveErrors = 0;
+          let useScreenshotFallback = operationMode === "screenshot";
+
+          while (
+            loopCount < safeMaxAgentLoops &&
+            !abortControllerRef.current?.signal.aborted
+          ) {
+            const actions = parseActionsFromResponse(currentResponse);
+            console.log(
+              `[Agent Loop] Loop ${loopCount}, Actions found: ${actions.length}`,
+              actions,
+            );
+            console.log(
+              `[Agent Loop] Current response:`,
+              currentResponse.slice(0, 200),
+            );
+
+            // Check if response indicates completion (only when NO actions found)
+            if (actions.length === 0) {
+              // No actions to execute - check if truly done or just needs prompting
+              const isCompletion = (() => {
+                const lower = currentResponse.toLowerCase();
+                // Very strict: only final completion phrases, not mid-task reports
+                const jpFinal =
+                  /(以上で完了|すべて完了|タスク完了|作業が完了|全て完了|完了です。$|完了しました。$)/;
+                const enFinal =
+                  /\b(all done|task completed|finished all|completed successfully)\b/;
+                return jpFinal.test(currentResponse) || enFinal.test(lower);
+              })();
+
+              if (isCompletion) {
+                console.log("[Agent Loop] Completion detected, stopping loop");
+              } else {
+                console.log("[Agent Loop] No actions found, stopping loop");
+              }
+              break;
+            }
+
+            if (loopCount > 0 && shouldRequireLoopApproval(actions)) {
+              const approved = confirmActionExecution(actions, loopCount + 1);
+              if (!approved) {
+                setMessages((prev: ChatMessage[]) => [
+                  ...prev,
+                  {
+                    role: "assistant",
+                    content: t("actionExecutionCancelled", language),
+                  },
+                ]);
+                break;
+              }
+            }
+
+            // Actions found - continue regardless of any "完了" in text
+
+            loopCount++;
+            const actionResults: string[] = [];
+            let errorCount = 0;
+
+            for (const action of actions) {
+              try {
+                // All modes now use improved local DOM operations
+                // (Playwright-style: auto-wait, multiple click methods, etc.)
+                const result = await executeBrowserAction(action);
+                console.log(`[Action] ${action.type} -> ${result}`);
+
+                actionResults.push(`• ${result}`);
+                if (
+                  result.includes("not found") ||
+                  result.includes("Error") ||
+                  result.includes("error")
+                ) {
+                  errorCount++;
+                }
+              } catch (error) {
+                actionResults.push(
+                  `• Error: ${error instanceof Error ? error.message : String(error)}`,
+                );
+                errorCount++;
+              }
+
+              // Short delay between actions (80-200ms)
+              await new Promise((resolve) =>
+                setTimeout(resolve, 80 + Math.random() * 120),
+              );
+            }
+
+            // Track consecutive errors for hybrid mode fallback
+            if (errorCount > 0) {
+              consecutiveErrors++;
+              // In hybrid mode, switch to screenshot after 3 consecutive errors
+              if (
+                operationMode === "hybrid" &&
+                consecutiveErrors >= 3 &&
+                !useScreenshotFallback
+              ) {
+                console.log(
+                  "[Agent] Hybrid mode: switching to screenshot fallback after 3 consecutive errors",
+                );
+                useScreenshotFallback = true;
+                actionResults.push(
+                  "📸 Switching to screenshot mode for better accuracy",
+                );
+              }
+            } else {
+              consecutiveErrors = 0;
+            }
+
+            const resultMessage = `🤖 [Loop ${loopCount}/${safeMaxAgentLoops}] ${t("executionResult", language)}\n${actionResults.join("\n")}`;
+            setMessages((prev: ChatMessage[]) => [
+              ...prev,
+              { role: "assistant", content: resultMessage },
+            ]);
+
+            // Only continue autonomous loop in agent mode
+            // For chat mode, stop after first execution (user can click "つづけて" to continue)
+            if (settings.provider !== "copilot-agent") {
+              console.log(
+                "[Agent] Chat mode - stopping after first action. Use Agent mode for autonomous loop.",
+              );
+              break;
+            }
+
+            console.log("[Agent] Agent mode - continuing autonomous loop...");
+
+            // Short wait between loops (0.5-1.0 seconds)
+            const waitTime = 500 + Math.random() * 500;
+            console.log(
+              `[Agent] Waiting ${Math.round(waitTime / 1000)}s before next loop...`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, waitTime));
+
+            // Get updated page content (with screenshot if in fallback mode)
+            let updatedPageContent = "";
+            let updatedScreenshot = "";
+
+            if (useScreenshotFallback) {
+              try {
+                updatedScreenshot = await captureScreenshot();
+                // Also get DOM elements for ref-based clicking
+                const domContent = await extractPageContent({
+                  mode: "interactive",
+                });
+                updatedPageContent = `[Screenshot attached]\n\n${domContent}`;
+                console.log("[Agent] Screenshot captured for fallback mode");
+              } catch (e) {
+                console.error("Screenshot fallback failed:", e);
+                maybeWarnScreenshotPermission(e);
+                updatedPageContent = await extractPageContent({
+                  mode: "interactive",
+                });
+              }
+            } else {
+              updatedPageContent = await extractPageContent({
+                mode: wantsContentOnly ? "content" : "interactive",
+                autoScrollForLazyLoad:
+                  wantsContentOnly && autoScrollForLazyLoad,
+              });
+            }
+
+            // Add results to conversation
+            conversationHistory = [
+              ...conversationHistory,
+              {
+                role: "user" as const,
+                content: t("loopContinuationPrompt", language)
+                  .replace("{loop}", String(loopCount))
+                  .replace("{results}", actionResults.join("\n")),
+              },
+            ];
+
+            // Request next action from LLM
+            try {
+              const loopAbortController = abortControllerRef.current;
+              if (!loopAbortController || loopAbortController.signal.aborted) {
+                break;
+              }
+
+              const continueResponse = await fetch(
+                `${getBridgeBaseUrl()}/chat`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    ...BRIDGE_CLIENT_HEADERS,
+                  },
+                  body: JSON.stringify({
+                    settings,
+                    messages: conversationHistory,
+                    pageContent: updatedPageContent,
+                    screenshot: updatedScreenshot || undefined,
+                    operationMode: useScreenshotFallback
+                      ? "screenshot"
+                      : operationMode,
+                  }),
+                  signal: loopAbortController.signal,
+                },
+              );
+
+              if (!continueResponse.ok) {
+                console.error("Continue response failed");
+                break;
+              }
+
+              const continueReader = continueResponse.body?.getReader();
+              if (!continueReader) {
+                console.error("Continue response has no stream body");
+                break;
+              }
+              currentResponse = "";
+              const continueDecoder = new TextDecoder();
+
+              setMessages((prev: ChatMessage[]) => [
+                ...prev,
+                { role: "assistant", content: "" },
+              ]);
+
+              while (true) {
+                const { done, value } = await continueReader.read();
+                if (done) {
+                  currentResponse += continueDecoder.decode();
+                  break;
+                }
+
+                const chunk = continueDecoder.decode(value, { stream: true });
+                currentResponse += chunk;
+
+                setMessages((prev: ChatMessage[]) => {
+                  const newMessages = [...prev];
+                  newMessages[newMessages.length - 1] = {
+                    role: "assistant",
+                    content: currentResponse,
+                  };
+                  return newMessages;
+                });
+              }
+
+              if (!currentResponse.trim()) {
+                setMessages((prev: ChatMessage[]) => {
+                  const newMessages = [...prev];
+                  if (
+                    newMessages.length > 0 &&
+                    newMessages[newMessages.length - 1].role === "assistant" &&
+                    !newMessages[newMessages.length - 1].content.trim()
+                  ) {
+                    newMessages[newMessages.length - 1] = {
+                      role: "assistant",
+                      content: t("emptyContinuationResponse", language),
+                    };
+                    return newMessages;
+                  }
+                  return [
+                    ...newMessages,
+                    {
+                      role: "assistant",
+                      content: t("emptyContinuationResponse", language),
+                    },
+                  ];
+                });
+                break;
+              }
+
+              // Add LLM response to conversation history
+              conversationHistory = [
+                ...conversationHistory,
+                { role: "assistant" as const, content: currentResponse },
+              ];
+              assistantResponsesForFileActions.push(currentResponse);
+            } catch (error) {
+              if (error instanceof Error && error.name === "AbortError") {
+                console.log("Autonomous loop cancelled by user");
+                break;
+              }
+              console.error("Error in autonomous loop:", error);
+              // Continue loop even on error
+            }
+          }
+
+          if (loopCount >= safeMaxAgentLoops) {
+            setMessages((prev: ChatMessage[]) => [
+              ...prev,
+              {
+                role: "assistant",
+                content: t("maxAgentLoopsReached", language).replace(
+                  "{count}",
+                  String(safeMaxAgentLoops),
+                ),
+              },
+            ]);
+          }
         }
       }
 
@@ -1071,16 +1207,18 @@ export default function App() {
               });
               if (result.success) {
                 const showLink = result.downloadId
-                  ? ` ([フォルダで表示](download-show:${result.downloadId}))`
+                  ? ` ([${t("showInFolder", language)}](download-show:${result.downloadId}))`
                   : "";
                 downloadResults.push(`• ✓ ${result.filename}${showLink}`);
               } else {
                 downloadResults.push(
-                  `• ✗ ${result.filename}: ${result.error || "ダウンロードに失敗しました"}`,
+                  `• ✗ ${result.filename}: ${result.error || t("downloadFailedDefault", language)}`,
                 );
               }
             } catch {
-              downloadResults.push(`• ✗ Base64デコードエラー: ${filePath}`);
+              downloadResults.push(
+                `• ✗ ${t("base64DecodeError", language).replace("{path}", filePath)}`,
+              );
             }
           }
           downloadRegex.lastIndex = 0;
@@ -1097,12 +1235,12 @@ export default function App() {
             const result = await executeFileAction(action);
             if (result.success) {
               const showLink = result.downloadId
-                ? ` ([フォルダで表示](download-show:${result.downloadId}))`
+                ? ` ([${t("showInFolder", language)}](download-show:${result.downloadId}))`
                 : "";
               downloadResults.push(`• ✓ ${result.filename}${showLink}`);
             } else {
               downloadResults.push(
-                `• ✗ ${result.filename}: ${result.error || "ダウンロードに失敗しました"}`,
+                `• ✗ ${result.filename}: ${result.error || t("downloadFailedDefault", language)}`,
               );
             }
           }
@@ -1113,7 +1251,7 @@ export default function App() {
             ...prev,
             {
               role: "assistant",
-              content: `\ud83d\udce5 ${language === "ja" ? "\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u5b8c\u4e86" : "Download complete"}:\n${downloadResults.join("\n")}\n\n\ud83d\udcc2 \u4fdd\u5b58\u5148: \u30d6\u30e9\u30a6\u30b6\u306e\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u30d5\u30a9\u30eb\u30c0`,
+              content: `📥 ${t("downloadComplete", language)}:\n${downloadResults.join("\n")}\n\n📂 ${t("downloadDestination", language)}`,
             },
           ]);
         }
@@ -1135,6 +1273,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
       abortControllerRef.current = null;
+      inFlightRequestRef.current = false;
     }
   };
 
@@ -1178,7 +1317,9 @@ export default function App() {
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={checkConnection}
+            onClick={() => {
+              void checkConnection();
+            }}
             className="p-2 hover:bg-gray-100 rounded"
             title={t("reconnect", language)}
           >
@@ -1199,7 +1340,9 @@ export default function App() {
         <div className="px-4 py-2 bg-red-100 text-red-700 text-sm">
           {t("connectionError", language)}
           <button
-            onClick={checkConnection}
+            onClick={() => {
+              void checkConnection();
+            }}
             className="ml-2 underline hover:no-underline"
           >
             {t("reconnectLink", language)}
@@ -1214,7 +1357,9 @@ export default function App() {
           onSettingsChange={setSettings}
           onClose={() => setShowSettings(false)}
           availableModels={availableModels}
-          onRefreshModels={fetchAvailableModels}
+          onRefreshModels={() => {
+            void fetchAvailableModels();
+          }}
           browserActionsEnabled={browserActionsEnabled}
           onBrowserActionsChange={setBrowserActionsEnabled}
           fileOperationsEnabled={fileOperationsEnabled}
@@ -1225,6 +1370,10 @@ export default function App() {
           onMaxAgentLoopsChange={setMaxAgentLoops}
           operationMode={operationMode}
           onOperationModeChange={setOperationMode}
+          serverPort={serverPort}
+          onServerPortChange={handleServerPortChange}
+          allowEvaluateAction={allowEvaluateAction}
+          onAllowEvaluateActionChange={setAllowEvaluateAction}
         />
       )}
 

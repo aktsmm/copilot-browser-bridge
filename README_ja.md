@@ -60,6 +60,14 @@
 - **モデル選択**: claude-sonnet, gpt-4o など
 - **動作モード**: テキスト / スクリーンショット / ハイブリッド
 - **最大ループ数**: 自動操作の最大繰り返し回数
+- **Evaluate操作の許可**: 既定はOFF（高リスク操作）
+
+### Evaluate 許可境界の確認手順
+
+1. 設定で **Evaluate操作の許可** を OFF にする
+2. `waitForSelector` を実行し、通常のDOM操作として実行されることを確認する
+3. 明示的な `playwright browser_evaluate` 指示は拒否されることを確認する
+4. 必要時のみ Evaluate を ON にし、実行後は OFF に戻す
 
 ## 🔧 開発
 

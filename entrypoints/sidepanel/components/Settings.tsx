@@ -2,6 +2,11 @@ import React from "react";
 import type { LLMSettings, ModelInfo, OperationMode } from "../types";
 import type { Language } from "../i18n";
 import { t } from "../i18n";
+import {
+  MAX_SERVER_PORT,
+  MIN_SERVER_PORT,
+  normalizeServerPort,
+} from "../server-port";
 
 interface SettingsProps {
   settings: LLMSettings;
@@ -19,6 +24,10 @@ interface SettingsProps {
   onMaxAgentLoopsChange: (max: number) => void;
   operationMode: OperationMode;
   onOperationModeChange: (mode: OperationMode) => void;
+  serverPort: number;
+  onServerPortChange: (port: number) => void;
+  allowEvaluateAction: boolean;
+  onAllowEvaluateActionChange: (enabled: boolean) => void;
 }
 
 const FALLBACK_COPILOT_MODELS = [
@@ -87,6 +96,10 @@ export function Settings({
   onMaxAgentLoopsChange,
   operationMode,
   onOperationModeChange,
+  serverPort,
+  onServerPortChange,
+  allowEvaluateAction,
+  onAllowEvaluateActionChange,
 }: SettingsProps) {
   // Filter models to Anthropic, OpenAI, Google only
   const filteredModels = availableModels.filter(
@@ -100,6 +113,20 @@ export function Settings({
     copilotModels.length > 0
       ? copilotModels.map((m) => ({ value: m.id, label: m.name }))
       : FALLBACK_COPILOT_MODELS;
+
+  const [serverPortInput, setServerPortInput] = React.useState(
+    String(serverPort),
+  );
+
+  React.useEffect(() => {
+    setServerPortInput(String(serverPort));
+  }, [serverPort]);
+
+  const commitServerPortInput = () => {
+    const normalizedPort = normalizeServerPort(serverPortInput);
+    setServerPortInput(String(normalizedPort));
+    onServerPortChange(normalizedPort);
+  };
 
   return (
     <div className="p-4 bg-white border-b max-h-[70vh] overflow-y-auto">
@@ -140,7 +167,9 @@ export function Settings({
             />
             <div>
               <span>Copilot (Agent)</span>
-              <p className="text-xs text-gray-500">@workspace, ツール使用可</p>
+              <p className="text-xs text-gray-500">
+                {t("copilotAgentDesc", language)}
+              </p>
             </div>
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
@@ -167,7 +196,7 @@ export function Settings({
               {t("model", language)}
             </label>
             <button
-              onClick={onRefreshModels}
+              onClick={() => onRefreshModels()}
               className="text-xs text-blue-600 hover:underline"
             >
               {t("refresh", language)}
@@ -185,7 +214,7 @@ export function Settings({
               })
             }
             className="w-full p-2 border rounded bg-white"
-            aria-label="モデル選択"
+            aria-label={t("modelSelectAria", language)}
           >
             {displayModels.map((model) => (
               <option key={model.value} value={model.value}>
@@ -297,6 +326,52 @@ export function Settings({
         </select>
       </div>
 
+      {/* Server Port */}
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          {t("serverPort", language)}
+        </label>
+        <input
+          type="number"
+          min={MIN_SERVER_PORT}
+          max={MAX_SERVER_PORT}
+          value={serverPortInput}
+          onChange={(e) => setServerPortInput(e.target.value)}
+          onBlur={commitServerPortInput}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitServerPortInput();
+            }
+          }}
+          className="w-full p-2 border rounded"
+          aria-label={t("serverPort", language)}
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          {t("serverPortDesc", language)}
+        </p>
+      </div>
+
+      {/* Evaluate Action Toggle */}
+      <div className="mb-4">
+        <label className="flex items-center justify-between cursor-pointer">
+          <div>
+            <span className="text-sm font-medium text-gray-700">
+              {t("allowEvaluateAction", language)}
+            </span>
+            <p className="text-xs text-gray-500">
+              {t("allowEvaluateActionDesc", language)}
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            checked={allowEvaluateAction}
+            onChange={(e) => onAllowEvaluateActionChange(e.target.checked)}
+            className="w-5 h-5 text-blue-600 rounded"
+          />
+        </label>
+      </div>
+
       {/* Max Agent Loops (only show for agent mode) */}
       {settings.provider === "copilot-agent" && (
         <div className="mb-4">
@@ -312,7 +387,9 @@ export function Settings({
             min={1}
             max={1000}
             value={maxAgentLoops}
-            onChange={(e) => onMaxAgentLoopsChange(normalizeAgentLoops(e.target.value))}
+            onChange={(e) =>
+              onMaxAgentLoopsChange(normalizeAgentLoops(e.target.value))
+            }
             className="w-full p-2 border rounded"
             aria-label={
               language === "ja" ? "最大ループ回数" : "Max Agent Loops"
