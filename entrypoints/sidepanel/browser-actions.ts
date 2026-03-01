@@ -9,6 +9,34 @@ let allowEvaluateAction = false;
 const EVALUATE_DISABLED_MESSAGE = "Evaluate action is disabled by default";
 const EVALUATE_DISABLED_MESSAGE_LOWER = EVALUATE_DISABLED_MESSAGE.toLowerCase();
 
+type BrowserTab = {
+  id?: number;
+  url?: string;
+  windowId?: number;
+};
+
+function resolveScriptResultMessage(result: unknown, fallback: string): string {
+  if (!result || typeof result !== "object") {
+    return fallback;
+  }
+
+  const candidate = result as {
+    success?: unknown;
+    message?: unknown;
+    error?: unknown;
+  };
+
+  if (candidate.success === true && typeof candidate.message === "string") {
+    return candidate.message;
+  }
+
+  if (typeof candidate.error === "string" && candidate.error.length > 0) {
+    return candidate.error;
+  }
+
+  return fallback;
+}
+
 async function getBridgeBaseUrl(): Promise<string> {
   return await new Promise((resolve) => {
     chrome.storage.local.get(
@@ -202,7 +230,7 @@ export async function executeBrowserAction(
   }
 }
 
-async function getCurrentTab(): Promise<chrome.tabs.Tab> {
+async function getCurrentTab(): Promise<BrowserTab> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.id) throw new Error("No active tab found");
   return tab;
@@ -351,9 +379,12 @@ async function ensureClientLoggers(): Promise<void> {
           const originalSend = XMLHttpRequest.prototype.send;
           XMLHttpRequest.prototype.open = function (
             this: XMLHttpRequest,
-            ...openArgs: Parameters<typeof originalOpen>
+            method: string,
+            url: string | URL,
+            async?: boolean,
+            username?: string | null,
+            password?: string | null,
           ) {
-            const [method, url] = openArgs;
             (
               this as unknown as {
                 __copilotMethod?: string;
@@ -368,7 +399,15 @@ async function ensureClientLoggers(): Promise<void> {
               }
             ).__copilotUrl =
               typeof url === "string" ? url : String(url ?? "unknown");
-            return originalOpen.apply(this, openArgs);
+
+            return originalOpen.call(
+              this,
+              method,
+              url,
+              async ?? true,
+              username,
+              password,
+            );
           };
           XMLHttpRequest.prototype.send = function (
             this: XMLHttpRequest,
@@ -638,7 +677,7 @@ async function clickElement(
     args: [selector, doubleClick ?? false, button ?? "left", modifiers ?? []],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Click failed";
+  return resolveScriptResultMessage(result, "Click failed");
 }
 
 async function typeText(
@@ -738,7 +777,7 @@ async function typeText(
     args: [selector, text, submit ?? false, slowly ?? false],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Type failed";
+  return resolveScriptResultMessage(result, "Type failed");
 }
 
 async function scroll(
@@ -852,7 +891,7 @@ async function waitForSelector(
     args: [selector, timeout],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Wait failed";
+  return resolveScriptResultMessage(result, "Wait failed");
 }
 
 // Wait for text to appear (like Playwright browser_wait_for)
@@ -876,7 +915,7 @@ async function waitForText(
     args: [text, timeout],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Wait failed";
+  return resolveScriptResultMessage(result, "Wait failed");
 }
 
 // Wait for text to disappear (like Playwright browser_wait_for textGone)
@@ -903,7 +942,7 @@ async function waitForTextGone(
     args: [text, timeout],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Wait failed";
+  return resolveScriptResultMessage(result, "Wait failed");
 }
 
 // Fill multiple form fields at once (like Playwright browser_fill_form)
@@ -972,7 +1011,7 @@ async function fillForm(
     args: [fields],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Fill form failed";
+  return resolveScriptResultMessage(result, "Fill form failed");
 }
 
 // Click at specific coordinates (like Playwright browser_mouse_click_xy)
@@ -1012,7 +1051,7 @@ async function clickAtCoordinates(
     args: [x, y, button ?? "left"],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Click failed";
+  return resolveScriptResultMessage(result, "Click failed");
 }
 
 // Handle browser dialogs (alert, confirm, prompt)
@@ -1133,7 +1172,7 @@ async function checkElement(
     args: [selector, checked],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Check failed";
+  return resolveScriptResultMessage(result, "Check failed");
 }
 
 // Evaluate JavaScript (like Playwright browser_evaluate)
@@ -1223,7 +1262,7 @@ async function evaluateScript(
     args: [script, selector, blockedPatternSource, blockedPatternFlags],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Evaluate failed";
+  return resolveScriptResultMessage(result, "Evaluate failed");
 }
 
 // Get console logs (like Playwright browser_console_messages)
@@ -1263,9 +1302,7 @@ async function getConsoleLogs(
     args: [level],
   });
   const result = results[0]?.result;
-  return result?.success
-    ? result.message
-    : result?.error || "Get console failed";
+  return resolveScriptResultMessage(result, "Get console failed");
 }
 
 // Get network requests (like Playwright browser_network_requests)
@@ -1340,9 +1377,7 @@ async function getNetworkRequests(includeStatic?: boolean): Promise<string> {
     args: [includeStatic ?? false],
   });
   const result = results[0]?.result;
-  return result?.success
-    ? result.message
-    : result?.error || "Get network failed";
+  return resolveScriptResultMessage(result, "Get network failed");
 }
 
 // Upload file (trigger file input click - actual file selection requires user interaction)
@@ -1375,10 +1410,117 @@ async function uploadFile(selector: string): Promise<string> {
     args: [selector],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Upload failed";
+  return resolveScriptResultMessage(result, "Upload failed");
 }
 
 // Parse action commands from LLM response
+function findBracketCommandEnd(source: string, contentStart: number): number {
+  let depth = 1;
+  let index = contentStart;
+  let quote: '"' | "'" | "`" | null = null;
+  let escaped = false;
+
+  while (index < source.length && depth > 0) {
+    const current = source[index];
+
+    if (escaped) {
+      escaped = false;
+      index++;
+      continue;
+    }
+
+    if (quote) {
+      if (current === "\\") {
+        escaped = true;
+      } else if (current === quote) {
+        quote = null;
+      }
+      index++;
+      continue;
+    }
+
+    if (current === '"' || current === "'" || current === "`") {
+      quote = current;
+      index++;
+      continue;
+    }
+
+    if (current === "[") {
+      depth++;
+    } else if (current === "]") {
+      depth--;
+    }
+
+    index++;
+  }
+
+  return depth === 0 ? index : -1;
+}
+
+function splitValueAndOptionalTimeout(input: string): {
+  value: string;
+  timeout?: number;
+} {
+  const trimmed = input.trim();
+  const lastComma = trimmed.lastIndexOf(",");
+
+  if (lastComma === -1) {
+    return { value: trimmed };
+  }
+
+  const candidateValue = trimmed.slice(0, lastComma).trim();
+  const timeoutText = trimmed.slice(lastComma + 1).trim();
+  const timeout = Number(timeoutText);
+
+  if (
+    candidateValue.length > 0 &&
+    timeoutText.length > 0 &&
+    Number.isFinite(timeout)
+  ) {
+    return { value: candidateValue, timeout };
+  }
+
+  return { value: trimmed };
+}
+
+function findCommaOutsideQuotes(source: string, startIndex: number): number {
+  let quote: '"' | "'" | "`" | null = null;
+  let escaped = false;
+
+  for (let index = startIndex; index < source.length; index++) {
+    const current = source[index];
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (current === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (current === quote) {
+        quote = null;
+      }
+
+      continue;
+    }
+
+    if (current === '"' || current === "'" || current === "`") {
+      quote = current;
+      continue;
+    }
+
+    if (current === ",") {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
 export function parseActionsFromResponse(response: string): BrowserAction[] {
   const actions: BrowserAction[] = [];
 
@@ -1389,16 +1531,9 @@ export function parseActionsFromResponse(response: string): BrowserAction[] {
     const actionStart = response.indexOf("[ACTION:", i);
     if (actionStart === -1) break;
 
-    // Find matching closing bracket
-    let depth = 1;
-    let j = actionStart + 8; // Skip "[ACTION:"
-    while (j < response.length && depth > 0) {
-      if (response[j] === "[") depth++;
-      else if (response[j] === "]") depth--;
-      j++;
-    }
+    const j = findBracketCommandEnd(response, actionStart + 8);
 
-    if (depth === 0) {
+    if (j !== -1) {
       const actionContent = response.substring(actionStart + 8, j - 1).trim();
       // Split by first comma only
       const firstComma = actionContent.indexOf(",");
@@ -1415,6 +1550,8 @@ export function parseActionsFromResponse(response: string): BrowserAction[] {
       if (parsedAction) {
         actions.push(parsedAction);
       }
+    } else {
+      break;
     }
 
     i = j;
@@ -1530,9 +1667,8 @@ function parseAction(type: string, params?: string): BrowserAction | null {
       return { type: "getHtml", selector: trimmedParams };
     case "waitforselector": {
       if (!trimmedParams) return null;
-      const [selector, timeoutStr] =
-        trimmedParams.split(",").map((s) => s.trim()) || [];
-      const timeout = timeoutStr ? Number(timeoutStr) : undefined;
+      const { value: selector, timeout } =
+        splitValueAndOptionalTimeout(trimmedParams);
       return selector
         ? {
             type: "waitForSelector",
@@ -1543,9 +1679,8 @@ function parseAction(type: string, params?: string): BrowserAction | null {
     }
     case "waitfortext": {
       if (!trimmedParams) return null;
-      const [text, timeoutStr] =
-        trimmedParams.split(",").map((s) => s.trim()) || [];
-      const timeout = timeoutStr ? Number(timeoutStr) : undefined;
+      const { value: text, timeout } =
+        splitValueAndOptionalTimeout(trimmedParams);
       return text
         ? {
             type: "waitForText",
@@ -1556,9 +1691,8 @@ function parseAction(type: string, params?: string): BrowserAction | null {
     }
     case "waitfortextgone": {
       if (!trimmedParams) return null;
-      const [text, timeoutStr] =
-        trimmedParams.split(",").map((s) => s.trim()) || [];
-      const timeout = timeoutStr ? Number(timeoutStr) : undefined;
+      const { value: text, timeout } =
+        splitValueAndOptionalTimeout(trimmedParams);
       return text
         ? {
             type: "waitForTextGone",
@@ -1757,19 +1891,15 @@ export function parseFileActionsFromResponse(response: string): FileAction[] {
     const fileStart = response.indexOf("[FILE:", i);
     if (fileStart === -1) break;
 
-    let depth = 1;
-    let j = fileStart + 6;
-    while (j < response.length && depth > 0) {
-      if (response[j] === "[") depth++;
-      else if (response[j] === "]") depth--;
-      j++;
-    }
+    const j = findBracketCommandEnd(response, fileStart + 6);
 
-    if (depth === 0) {
+    if (j !== -1) {
       const fileContent = response.substring(fileStart + 6, j - 1).trim();
-      const firstComma = fileContent.indexOf(",");
+      const firstComma = findCommaOutsideQuotes(fileContent, 0);
       const secondComma =
-        firstComma >= 0 ? fileContent.indexOf(",", firstComma + 1) : -1;
+        firstComma >= 0
+          ? findCommaOutsideQuotes(fileContent, firstComma + 1)
+          : -1;
 
       if (firstComma > 0 && secondComma > firstComma) {
         const actionType = fileContent.substring(0, firstComma).trim();
@@ -1788,6 +1918,8 @@ export function parseFileActionsFromResponse(response: string): FileAction[] {
           });
         }
       }
+    } else {
+      break;
     }
 
     i = j;
@@ -1813,7 +1945,11 @@ export async function executeFileAction(
           content: action.content,
           mimeType: "text/plain;charset=utf-8",
         },
-        (response) => {
+        (response?: {
+          success?: boolean;
+          downloadId?: number;
+          error?: string;
+        }) => {
           if (chrome.runtime.lastError) {
             resolve({
               success: false,
@@ -1920,9 +2056,7 @@ async function selectRadio(selector: string, value?: string): Promise<string> {
     args: [selector, value],
   });
   const result = results[0]?.result;
-  return result?.success
-    ? result.message
-    : result?.error || "Radio selection failed";
+  return resolveScriptResultMessage(result, "Radio selection failed");
 }
 
 // Select option from dropdown
@@ -1988,7 +2122,7 @@ async function selectOption(selector: string, value: string): Promise<string> {
     args: [selector, value],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Select failed";
+  return resolveScriptResultMessage(result, "Select failed");
 }
 
 // Set slider value
@@ -2069,7 +2203,7 @@ async function setSlider(selector: string, value: number): Promise<string> {
     args: [selector, value],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Slider failed";
+  return resolveScriptResultMessage(result, "Slider failed");
 }
 
 // Drag element from start to end
@@ -2177,7 +2311,7 @@ async function dragElement(
     args: [startSelector, endSelector],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Drag failed";
+  return resolveScriptResultMessage(result, "Drag failed");
 }
 
 // Hover over element
@@ -2220,7 +2354,7 @@ async function hoverElement(selector: string): Promise<string> {
     args: [selector],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Hover failed";
+  return resolveScriptResultMessage(result, "Hover failed");
 }
 
 // Focus on element
@@ -2253,7 +2387,7 @@ async function focusElement(selector: string): Promise<string> {
     args: [selector],
   });
   const result = results[0]?.result;
-  return result?.success ? result.message : result?.error || "Focus failed";
+  return resolveScriptResultMessage(result, "Focus failed");
 }
 
 // ============================================
