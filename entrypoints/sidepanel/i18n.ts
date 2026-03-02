@@ -31,11 +31,14 @@ export const translations = {
       "⚠️ 続行応答が空だったため、自律実行を停止しました。",
     maxAgentLoopsReached:
       "⚠️ 最大ループ回数 ({count}) に達したため、自律実行を停止しました。",
-    systemPageUnsupported: "[システムページ: {url}] - このページの内容は取得できません",
-    actionExecutionConfirm:
-      "AIが {count} 件のブラウザ操作を提案しました。実行しますか？",
-    actionExecutionCancelled:
-      "ブラウザ操作はキャンセルされました。必要なら設定で有効化したうえで再実行してください。",
+    systemPageUnsupported:
+      "[システムページ: {url}] - このページの内容は取得できません",
+    highRiskActionBlocked:
+      "⚠️ 高リスク操作は設定で無効のためスキップしました: {types}",
+    highRiskActionBlockedAll:
+      "⚠️ 提案された操作はすべて高リスクのため実行しませんでした。設定の「高リスク操作を許可」を有効にすると続行できます。",
+    fullAutoMigrationNotice:
+      "ℹ️ UX改善のため初回のみフルオート設定へ移行しました（ブラウザ操作/高リスク操作/Evaluate）。必要なら設定で変更できます。",
     loopContinuationPrompt:
       "アクション実行結果 (Loop {loop}):\n{results}\n\n続けてください。エラーがあれば別の方法を試してください。完了したら「完了」と報告してください。",
     showInFolder: "フォルダで表示",
@@ -59,9 +62,14 @@ export const translations = {
     language: "言語",
     serverPort: "サーバーポート",
     serverPortDesc: "VS Code拡張サーバーの接続先ポート (1-65535)",
+    allowHighRiskActions: "高リスク操作を許可",
+    allowHighRiskActionsDesc:
+      "newTab / closeTab / evaluate などの高リスク操作を実行可能にします。無効時は自動実行しません。",
     allowEvaluateAction: "Evaluate操作を許可",
     allowEvaluateActionDesc:
       "高リスク操作。必要時のみ有効化し、意図しないスクリプト実行に注意してください。",
+    allowEvaluateActionDisabledHint:
+      "「高リスク操作を許可」が無効の間は Evaluate 操作を変更できません。",
     copilotAgentDesc: "@workspace, ツール使用可",
     modelSelectAria: "モデル選択",
   },
@@ -95,12 +103,16 @@ export const translations = {
       "⚠️ Continuation response was empty, so autonomous execution was stopped.",
     maxAgentLoopsReached:
       "⚠️ Reached maximum loop count ({count}), so autonomous execution was stopped.",
-    systemPageUnsupported: "[System page: {url}] - Cannot access content on this page",
-    actionExecutionConfirm: "AI suggested {count} browser actions. Execute now?",
-    actionExecutionCancelled:
-      "Browser action execution was cancelled. Re-run when you are ready.",
+    systemPageUnsupported:
+      "[System page: {url}] - Cannot access content on this page",
+    highRiskActionBlocked:
+      "⚠️ High-risk actions are disabled in settings and were skipped: {types}",
+    highRiskActionBlockedAll:
+      '⚠️ All suggested actions were high-risk and were not executed. Enable "Allow High-Risk Actions" in settings to continue.',
+    fullAutoMigrationNotice:
+      "ℹ️ To improve UX, settings were migrated to full-auto once (Browser Actions / High-Risk Actions / Evaluate). You can change them in Settings anytime.",
     loopContinuationPrompt:
-      "Action execution result (Loop {loop}):\n{results}\n\nPlease continue. If there are errors, try another approach. Report \"completed\" once finished.",
+      'Action execution result (Loop {loop}):\n{results}\n\nPlease continue. If there are errors, try another approach. Report "completed" once finished.',
     showInFolder: "Show in folder",
     downloadFailedDefault: "Download failed",
     base64DecodeError: "Base64 decode error: {path}",
@@ -122,9 +134,14 @@ export const translations = {
     language: "Language",
     serverPort: "Server Port",
     serverPortDesc: "Target port of the VS Code bridge server (1-65535)",
+    allowHighRiskActions: "Allow High-Risk Actions",
+    allowHighRiskActionsDesc:
+      "Allows high-risk actions such as newTab / closeTab / evaluate. When disabled, these actions are not executed.",
     allowEvaluateAction: "Allow Evaluate Action",
     allowEvaluateActionDesc:
       "High-risk operation. Enable only when needed and review generated scripts carefully.",
+    allowEvaluateActionDisabledHint:
+      'You cannot change Evaluate while "Allow High-Risk Actions" is disabled.',
     copilotAgentDesc: "@workspace, tools enabled",
     modelSelectAria: "Model selection",
   },

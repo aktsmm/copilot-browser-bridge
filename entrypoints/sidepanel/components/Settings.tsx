@@ -26,6 +26,8 @@ interface SettingsProps {
   onOperationModeChange: (mode: OperationMode) => void;
   serverPort: number;
   onServerPortChange: (port: number) => void;
+  allowHighRiskActions: boolean;
+  onAllowHighRiskActionsChange: (enabled: boolean) => void;
   allowEvaluateAction: boolean;
   onAllowEvaluateActionChange: (enabled: boolean) => void;
 }
@@ -98,6 +100,8 @@ export function Settings({
   onOperationModeChange,
   serverPort,
   onServerPortChange,
+  allowHighRiskActions,
+  onAllowHighRiskActionsChange,
   allowEvaluateAction,
   onAllowEvaluateActionChange,
 }: SettingsProps) {
@@ -127,6 +131,8 @@ export function Settings({
     setServerPortInput(String(normalizedPort));
     onServerPortChange(normalizedPort);
   };
+
+  const isEvaluateActionDisabled = !allowHighRiskActions;
 
   return (
     <div className="p-4 bg-white border-b max-h-[70vh] overflow-y-auto">
@@ -352,6 +358,26 @@ export function Settings({
         </p>
       </div>
 
+      {/* High-Risk Action Toggle */}
+      <div className="mb-4">
+        <label className="flex items-center justify-between cursor-pointer">
+          <div>
+            <span className="text-sm font-medium text-gray-700">
+              {t("allowHighRiskActions", language)}
+            </span>
+            <p className="text-xs text-gray-500">
+              {t("allowHighRiskActionsDesc", language)}
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            checked={allowHighRiskActions}
+            onChange={(e) => onAllowHighRiskActionsChange(e.target.checked)}
+            className="w-5 h-5 text-blue-600 rounded"
+          />
+        </label>
+      </div>
+
       {/* Evaluate Action Toggle */}
       <div className="mb-4">
         <label className="flex items-center justify-between cursor-pointer">
@@ -362,12 +388,18 @@ export function Settings({
             <p className="text-xs text-gray-500">
               {t("allowEvaluateActionDesc", language)}
             </p>
+            {isEvaluateActionDisabled && (
+              <p className="text-xs text-gray-500 mt-1">
+                {t("allowEvaluateActionDisabledHint", language)}
+              </p>
+            )}
           </div>
           <input
             type="checkbox"
             checked={allowEvaluateAction}
             onChange={(e) => onAllowEvaluateActionChange(e.target.checked)}
-            className="w-5 h-5 text-blue-600 rounded"
+            disabled={isEvaluateActionDisabled}
+            className="w-5 h-5 text-blue-600 rounded disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </label>
       </div>
