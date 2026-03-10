@@ -354,6 +354,18 @@ export default function App() {
     }
   };
 
+  const buildBridgeHttpError = async (response: Response) => {
+    let detail = "";
+    try {
+      detail = (await response.text()).trim();
+    } catch {
+      detail = "";
+    }
+
+    const summary = `Bridge request failed (${response.status} ${response.statusText})`;
+    return detail ? `${summary}: ${detail}` : summary;
+  };
+
   const handleServerPortChange = (nextPort: number) => {
     const normalizedPort = normalizeServerPort(nextPort);
     setServerPort(normalizedPort);
@@ -816,7 +828,7 @@ export default function App() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to get response");
+        throw new Error(await buildBridgeHttpError(response));
       }
 
       // Handle streaming response
@@ -1106,7 +1118,16 @@ export default function App() {
             });
 
             if (!continueResponse.ok) {
-              console.error("Continue response failed");
+              const continueError =
+                await buildBridgeHttpError(continueResponse);
+              console.error(continueError);
+              setMessages((prev: ChatMessage[]) => [
+                ...prev,
+                {
+                  role: "assistant",
+                  content: `${t("connectionError", language)}\n\n${continueError}`,
+                },
+              ]);
               break;
             }
 
@@ -1289,11 +1310,13 @@ export default function App() {
         console.log("Request cancelled by user");
       } else {
         console.error("Error sending message:", error);
+        const detail =
+          error instanceof Error && error.message ? `\n\n${error.message}` : "";
         setMessages((prev: ChatMessage[]) => [
           ...prev,
           {
             role: "assistant",
-            content: t("connectionError", language),
+            content: `${t("connectionError", language)}${detail}`,
           },
         ]);
       }
