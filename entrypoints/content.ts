@@ -10,18 +10,24 @@ export default defineContentScript({
     // メッセージリスナー（将来の拡張用）
     browser.runtime.onMessage.addListener(
       (
-        message: { type: string },
+        message: unknown,
         _sender: chrome.runtime.MessageSender,
         sendResponse: (response: {
           content: string;
           interactiveElements?: string;
         }) => void,
       ) => {
-        if (message.type === "extractContent") {
+        if (!message || typeof message !== "object") {
+          return;
+        }
+
+        const typedMessage = message as { type: string };
+
+        if (typedMessage.type === "extractContent") {
           const content = extractVisibleText();
           sendResponse({ content });
         }
-        if (message.type === "extractContentWithElements") {
+        if (typedMessage.type === "extractContentWithElements") {
           const content = extractVisibleText();
           const interactiveElements = extractInteractiveElements();
           sendResponse({ content, interactiveElements });

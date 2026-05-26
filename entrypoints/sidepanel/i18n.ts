@@ -53,6 +53,8 @@ export const translations = {
     model: "モデル",
     refresh: "🔄 更新",
     modelNotConnected: "※ VS Code未接続のため既定モデル表示中",
+    modelFetchFailed:
+      "⚠️ VS Code への接続はありますが、モデル一覧の取得に失敗しました。更新を再試行してください。",
     endpoint: "エンドポイント",
     modelName: "モデル名 (空欄で自動検出)",
     browserActions: "ブラウザ操作",
@@ -125,6 +127,8 @@ export const translations = {
     model: "Model",
     refresh: "🔄 Refresh",
     modelNotConnected: "※ Default models (VS Code not connected)",
+    modelFetchFailed:
+      "⚠️ Connected to VS Code, but failed to load the model list. Please refresh and try again.",
     endpoint: "Endpoint",
     modelName: "Model name (auto-detect if empty)",
     browserActions: "Browser Actions",

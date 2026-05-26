@@ -7,6 +7,7 @@ import {
   MIN_SERVER_PORT,
   normalizeServerPort,
 } from "../server-port";
+import { buildDisplayedCopilotModels } from "../copilot-models";
 
 interface SettingsProps {
   settings: LLMSettings;
@@ -14,6 +15,7 @@ interface SettingsProps {
   onClose: () => void;
   isConnected: boolean;
   availableModels: ModelInfo[];
+  modelFetchFailed: boolean;
   onRefreshModels: () => void;
   browserActionsEnabled: boolean;
   onBrowserActionsChange: (enabled: boolean) => void;
@@ -33,44 +35,6 @@ interface SettingsProps {
   onAllowEvaluateActionChange: (enabled: boolean) => void;
 }
 
-const FALLBACK_COPILOT_MODELS = [
-  { value: "gpt-4o", label: "GPT-4o" },
-  { value: "gpt-4o-mini", label: "GPT-4o mini" },
-  { value: "claude-3.5-sonnet", label: "Claude 3.5 Sonnet" },
-  { value: "claude-sonnet-4", label: "Claude Sonnet 4" },
-  { value: "claude-opus-4", label: "Claude Opus 4" },
-  { value: "o1", label: "o1" },
-  { value: "o1-mini", label: "o1 mini" },
-  { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-] as const;
-
-// Filter to show only Anthropic, OpenAI, and Google models
-const ALLOWED_VENDORS = ["anthropic", "openai", "google", "copilot"];
-const ALLOWED_FAMILIES = [
-  // OpenAI
-  "gpt-4o",
-  "gpt-4o-mini",
-  "gpt-4",
-  "gpt-4-turbo",
-  "o1",
-  "o1-mini",
-  "o1-preview",
-  "o3",
-  "o3-mini",
-  // Anthropic
-  "claude-3.5-sonnet",
-  "claude-3-opus",
-  "claude-3-sonnet",
-  "claude-3-haiku",
-  "claude-sonnet-4",
-  "claude-opus-4",
-  // Google
-  "gemini-2.0-flash",
-  "gemini-1.5-pro",
-  "gemini-1.5-flash",
-  "gemini-pro",
-];
-
 const MIN_AGENT_LOOPS = 1;
 const MAX_AGENT_LOOPS = 1000;
 const DEFAULT_AGENT_LOOPS = 500;
@@ -89,6 +53,7 @@ export function Settings({
   onClose,
   isConnected,
   availableModels,
+  modelFetchFailed,
   onRefreshModels,
   browserActionsEnabled,
   onBrowserActionsChange,
@@ -107,18 +72,10 @@ export function Settings({
   allowEvaluateAction,
   onAllowEvaluateActionChange,
 }: SettingsProps) {
-  // Filter models to Anthropic, OpenAI, Google only
-  const filteredModels = availableModels.filter(
-    (m) =>
-      ALLOWED_VENDORS.some((v) => m.provider.toLowerCase().includes(v)) ||
-      ALLOWED_FAMILIES.some((f) => m.id.toLowerCase().includes(f)),
+  const displayModels = buildDisplayedCopilotModels(
+    availableModels,
+    settings.copilot.model,
   );
-
-  const copilotModels = filteredModels.filter((m) => m.provider === "copilot");
-  const displayModels =
-    copilotModels.length > 0
-      ? copilotModels.map((m) => ({ value: m.id, label: m.name }))
-      : FALLBACK_COPILOT_MODELS;
 
   const [serverPortInput, setServerPortInput] = React.useState(
     String(serverPort),
@@ -230,9 +187,14 @@ export function Settings({
               </option>
             ))}
           </select>
-          {!isConnected && copilotModels.length === 0 && (
+          {!isConnected && availableModels.length === 0 && (
             <p className="text-xs text-gray-500 mt-1">
               {t("modelNotConnected", language)}
+            </p>
+          )}
+          {isConnected && modelFetchFailed && availableModels.length === 0 && (
+            <p className="text-xs text-amber-600 mt-1">
+              {t("modelFetchFailed", language)}
             </p>
           )}
         </div>

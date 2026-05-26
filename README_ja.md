@@ -56,11 +56,13 @@
 
 サイドパネルの設定ボタンから以下を設定可能:
 
-- **プロバイダー**: Copilot / LM Studio
+- **プロバイダー**: Copilot (Chat) / Copilot (Agent) / LM Studio
 - **モデル選択**: claude-sonnet, gpt-4o など
 - **動作モード**: テキスト / スクリーンショット / ハイブリッド
-- **最大ループ数**: 自動操作の最大繰り返し回数
-- **Evaluate操作の許可**: 既定はOFF（高リスク操作）
+- **最大ループ数**: Copilot (Agent) 利用時の自動操作の最大繰り返し回数
+- **高リスク操作 / Evaluate操作の許可**: `newTab` / `closeTab` / `evaluate` などの安全トグル。Evaluate は高リスク操作を許可した場合のみ有効化できます
+
+VS Code とは接続できているのにモデル一覧の取得に失敗した場合でも、設定パネルに警告を表示したうえでフォールバックモデルを継続表示するため、単なる未接続状態と区別できます。
 
 ### Evaluate 許可境界の確認手順
 
@@ -75,8 +77,20 @@
 # 開発サーバー起動
 npm run dev
 
+# 単体テスト
+npm run test
+
+# Lint
+npm run lint
+
+# 型チェック
+npm run typecheck
+
 # ビルド
 npm run build
+
+# Chrome / VS Code 間の整合チェック
+npm run validate:bridge
 
 # ZIP作成（Chrome Web Store用）
 npm run zip
@@ -103,14 +117,16 @@ CC BY-NC-SA 4.0 © [aktsmm](https://github.com/aktsmm)
 
 ### 権限の使用目的
 
-| 権限             | 目的                                    |
-| ---------------- | --------------------------------------- |
-| activeTab        | 現在のページ内容を取得するため          |
-| tabs             | タブ情報（URL、タイトル）を取得するため |
-| scripting        | ページのDOM要素を解析するため           |
-| storage          | ユーザー設定を保存するため              |
-| sidePanel        | チャットUIを表示するため                |
-| host_permissions | 任意のWebページで動作するため           |
+| 権限             | 目的                                               |
+| ---------------- | -------------------------------------------------- |
+| activeTab        | 現在のページ内容を取得するため                     |
+| tabs             | タブ情報（URL、タイトル）を取得するため            |
+| scripting        | ページのDOM要素を解析するため                      |
+| storage          | ユーザー設定を保存するため                         |
+| sidePanel        | チャットUIを表示するため                           |
+| host_permissions | ユーザーがサイドパネルを開いたページを読み取るため |
+
+任意のサイトで現在のページを解析できるよう広いサイトアクセス権限を要求していますが、取得したページ内容はまずローカルの VS Code bridge (`localhost`) にのみ送信され、その後はユーザーが選択した LLM プロバイダーへ送られます。
 
 ### LLMへのデータ送信
 

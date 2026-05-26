@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["wxt/client", "chrome"],
+    "jsx": "react-jsx"
+  },
+  "include": ["**/*.ts", "**/*.tsx", ".wxt/wxt.d.ts"],
+  "exclude": [
+    "node_modules",
+    ".output",
+    "entrypoints/sidepanel/chrome-shim.d.ts"
+  ]
+}

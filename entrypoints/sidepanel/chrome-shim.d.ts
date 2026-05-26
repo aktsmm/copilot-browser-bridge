@@ -19,6 +19,11 @@ type ChromeExecuteScriptResult<T = unknown> = {
   result: T;
 };
 
+type ChromeCaptureVisibleTabOptions = {
+  format?: "jpeg" | "png";
+  quality?: number;
+};
+
 declare const chrome: {
   storage: {
     local: ChromeStorageArea;
@@ -34,12 +39,11 @@ declare const chrome: {
     reload(tabId: number): Promise<void>;
     create(createProperties: ChromeRecord): Promise<ChromeTabLike>;
     remove(tabId: number): Promise<void>;
+    captureVisibleTab(): Promise<string>;
+    captureVisibleTab(options: ChromeCaptureVisibleTabOptions): Promise<string>;
     captureVisibleTab(
-      windowId?: number,
-      options?: {
-        format?: "jpeg" | "png";
-        quality?: number;
-      },
+      windowId: number,
+      options?: ChromeCaptureVisibleTabOptions,
     ): Promise<string>;
   };
   scripting: {

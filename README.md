@@ -56,10 +56,13 @@ Available now: [Install from Chrome Web Store](https://chromewebstore.google.com
 
 Configure from the side panel settings button:
 
-- **Provider**: Copilot / LM Studio
+- **Provider**: Copilot (Chat) / Copilot (Agent) / LM Studio
 - **Model Selection**: claude-sonnet, gpt-4o, etc.
 - **Operation Mode**: Text / Screenshot / Hybrid
-- **Max Loop Count**: Maximum iterations for automation
+- **Max Loop Count**: Maximum iterations for automation when using Copilot (Agent)
+- **High-Risk Actions / Evaluate**: Optional safety toggles for actions such as `newTab`, `closeTab`, and `evaluate`; Evaluate can only be enabled after high-risk actions are allowed
+
+If the extension is connected to VS Code but the model list cannot be loaded, fallback models remain visible and the settings panel shows a warning so you can retry refresh instead of mistaking it for a disconnected state.
 
 ## Development
 
@@ -67,8 +70,20 @@ Configure from the side panel settings button:
 # Start dev server
 npm run dev
 
+# Run unit tests
+npm run test
+
+# Lint
+npm run lint
+
+# Type-check
+npm run typecheck
+
 # Build
 npm run build
+
+# Cross-extension consistency checks
+npm run validate:bridge
 
 # Create ZIP (for Chrome Web Store)
 npm run zip
@@ -95,14 +110,16 @@ This extension respects user privacy.
 
 ### Permission Usage
 
-| Permission       | Purpose                   |
-| ---------------- | ------------------------- |
-| activeTab        | Get current page content  |
-| tabs             | Get tab info (URL, title) |
-| scripting        | Analyze page DOM elements |
-| storage          | Save user settings        |
-| sidePanel        | Display chat UI           |
-| host_permissions | Work on any web page      |
+| Permission       | Purpose                                                           |
+| ---------------- | ----------------------------------------------------------------- |
+| activeTab        | Get current page content                                          |
+| tabs             | Get tab info (URL, title)                                         |
+| scripting        | Analyze page DOM elements                                         |
+| storage          | Save user settings                                                |
+| sidePanel        | Display chat UI                                                   |
+| host_permissions | Read the active page on sites where the user opens the side panel |
+
+The extension requests site access broadly because it can analyze the currently opened page on arbitrary sites, but page content is sent only to the local VS Code bridge on `localhost` and then to the provider selected by the user.
 
 ### LLM Data Transmission
 

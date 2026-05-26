@@ -834,7 +834,7 @@ async function takeScreenshot(): Promise<string> {
 // Export screenshot capture for Vision API
 export async function captureScreenshot(): Promise<string> {
   try {
-    const dataUrl = await chrome.tabs.captureVisibleTab(undefined, {
+    const dataUrl = await chrome.tabs.captureVisibleTab({
       format: "png",
     });
     // Return full data URL (let the server handle parsing)
@@ -1823,7 +1823,9 @@ function parseAction(type: string, params?: string): BrowserAction | null {
         const selectorByPrefix =
           /^ref:\s*e\d+$/i.test(possibleSelector) ||
           /^e\d+$/i.test(possibleSelector) ||
-          /^[#.\[]/.test(possibleSelector);
+          possibleSelector.startsWith("#") ||
+          possibleSelector.startsWith(".") ||
+          possibleSelector.startsWith("[");
 
         const selectorByTagLike =
           /^[a-z][a-z0-9:_-]*(?:\s*[>+~]\s*.*)?$/i.test(possibleSelector) &&
@@ -1933,9 +1935,7 @@ export async function executeFileAction(
   action: FileAction,
 ): Promise<FileActionResult> {
   try {
-    const filename = action.path
-      .replace(/^[\/\\]+/, "")
-      .replace(/[\/\\]/g, "_");
+    const filename = action.path.replace(/^[/\\]+/, "").replace(/[/\\]/g, "_");
 
     return new Promise((resolve) => {
       chrome.runtime.sendMessage(
@@ -2785,7 +2785,9 @@ export function convertToPlaywrightAction(
   const start = Date.now();
 
   const resolveElement = () => {
-    const refMatch = selector.match(/^(?:\[\s*)?(?:ref:\s*)?([eE]\\d+)(?:\s*\])?(?:\\b.*)?$/);
+    const refMatch = selector.match(
+      new RegExp("^(?:\\[\\s*)?(?:ref:\\s*)?([eE]\\d+)(?:\\s*\\])?(?:\\b.*)?$"),
+    );
     if (refMatch) {
       return document.querySelector(
         \`[data-copilot-ref="\${refMatch[1].toLowerCase()}"]\`,

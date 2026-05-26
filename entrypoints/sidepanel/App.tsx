@@ -185,6 +185,7 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [modelFetchFailed, setModelFetchFailed] = useState(false);
   const [browserActionsEnabled, setBrowserActionsEnabled] = useState(true);
   const [fileOperationsEnabled, setFileOperationsEnabled] = useState(true);
   const [language, setLanguage] = useState<Language>("ja");
@@ -233,6 +234,9 @@ export default function App() {
       }) => {
         let effectiveServerPort = DEFAULT_SERVER_PORT;
         let effectiveAllowEvaluateAction = true;
+        const effectiveLanguage = isLanguage(result.language)
+          ? result.language
+          : language;
         const migrationVersion = resolveFullAutoMigrationVersion(result);
         const shouldForceFullAutoMigration =
           migrationVersion < FULL_AUTO_MIGRATION_TARGET_VERSION;
@@ -295,9 +299,6 @@ export default function App() {
 
         setEvaluateActionEnabled(effectiveAllowEvaluateAction);
 
-        const effectiveLanguage = isLanguage(result.language)
-          ? result.language
-          : language;
         const nextPendingPrompt = toPendingPrompt(
           result.pendingAction,
           effectiveLanguage,
@@ -363,11 +364,17 @@ export default function App() {
       console.log("Connection status:", connected);
       setIsConnected(connected);
       if (connected) {
-        fetchAvailableModels(overridePort);
+        setModelFetchFailed(false);
+        void fetchAvailableModels(overridePort);
+      } else {
+        setAvailableModels([]);
+        setModelFetchFailed(false);
       }
     } catch (error) {
       console.log("Connection failed:", error);
       setIsConnected(false);
+      setAvailableModels([]);
+      setModelFetchFailed(false);
     } finally {
       clearTimeout(timeout);
     }
@@ -384,6 +391,7 @@ export default function App() {
       if (response.ok) {
         const models = await response.json();
         setAvailableModels(models);
+        setModelFetchFailed(false);
         setSettings((currentSettings) => {
           if (
             currentSettings.provider !== "copilot" &&
@@ -409,8 +417,18 @@ export default function App() {
             },
           };
         });
+      } else {
+        setAvailableModels([]);
+        setModelFetchFailed(true);
+        console.error(
+          "Failed to fetch models",
+          response.status,
+          response.statusText,
+        );
       }
     } catch {
+      setAvailableModels([]);
+      setModelFetchFailed(true);
       console.error("Failed to fetch models");
     } finally {
       clearTimeout(timeout);
@@ -637,9 +655,6 @@ export default function App() {
               else if (tag === "input") role = "textbox";
               else if (tag === "select") role = "combobox";
               else if (tag === "textarea") role = "textbox";
-              else if (tag === "label" && type === "radio") role = "radio";
-              else if (tag === "label" && type === "checkbox")
-                role = "checkbox";
               else if (tag === "label" && type) role = type;
               else if (["h1", "h2", "h3", "h4", "h5", "h6"].includes(tag))
                 role = "heading";
@@ -1309,8 +1324,8 @@ export default function App() {
             try {
               const content = decodeBase64Utf8(b64Content);
               const filename = filePath
-                .replace(/^[\/\\]+/, "")
-                .replace(/[\/\\]/g, "_");
+                .replace(/^[/\\]+/, "")
+                .replace(/[/\\]/g, "_");
               const result = await executeFileAction({
                 type: "create",
                 path: filename,
@@ -1471,6 +1486,7 @@ export default function App() {
           onClose={() => setShowSettings(false)}
           isConnected={isConnected}
           availableModels={availableModels}
+          modelFetchFailed={modelFetchFailed}
           onRefreshModels={() => {
             void fetchAvailableModels();
           }}

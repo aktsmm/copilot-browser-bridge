@@ -5,7 +5,7 @@ export default defineConfig({
   manifest: {
     name: "Copilot Browser Bridge",
     description: "ブラウザのページ内容をCopilot/ローカルLLMで解析・対話",
-    version: process.env.npm_package_version || "0.1.7",
+    version: process.env.npm_package_version || "0.1.9",
     icons: {
       16: "icon/16.png",
       48: "icon/48.png",
@@ -29,3 +29,4 @@ export default defineConfig({
     },
   },
 });
+

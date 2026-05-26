@@ -5,8 +5,39 @@ export default defineBackground({
   type: "module",
 
   main() {
+    const openSidePanel = async (windowId: number): Promise<void> => {
+      try {
+        await browser.sidePanel.open({ windowId });
+      } catch (error) {
+        console.error(
+          "Copilot Browser Bridge: Failed to open side panel",
+          error,
+        );
+      }
+    };
+
+    const setPendingAction = async (
+      pendingAction: { type: "question"; text: string } | { type: "summarize" },
+    ): Promise<void> => {
+      try {
+        await browser.storage.local.set({ pendingAction });
+      } catch (error) {
+        console.error(
+          "Copilot Browser Bridge: Failed to store pending action",
+          error,
+        );
+      }
+    };
+
     // アクションクリックでサイドパネルを開く
-    browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+    void browser.sidePanel
+      .setPanelBehavior({ openPanelOnActionClick: true })
+      .catch((error: unknown) => {
+        console.error(
+          "Copilot Browser Bridge: Failed to set side panel behavior",
+          error,
+        );
+      });
 
     // コンテキストメニュー作成
     browser.runtime.onInstalled.addListener(() => {
@@ -28,45 +59,46 @@ export default defineBackground({
       async (info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) => {
         if (!tab?.windowId) return;
 
-        // サイドパネルを開く
-        await browser.sidePanel.open({ windowId: tab.windowId });
-
         // 選択テキストがある場合は送信
         if (info.menuItemId === "askAboutSelection" && info.selectionText) {
           // storage経由でサイドパネルに渡す
-          await browser.storage.local.set({
-            pendingAction: {
-              type: "question",
-              text: info.selectionText,
-            },
+          await setPendingAction({
+            type: "question",
+            text: info.selectionText,
           });
         }
 
         if (info.menuItemId === "summarizePage") {
-          await browser.storage.local.set({
-            pendingAction: {
-              type: "summarize",
-            },
+          await setPendingAction({
+            type: "summarize",
           });
         }
+
+        await openSidePanel(tab.windowId);
       },
     );
 
     // メッセージハンドラ（ダウンロード等）
     browser.runtime.onMessage.addListener(
       (
-        message: {
+        message: unknown,
+        _sender: chrome.runtime.MessageSender,
+        sendResponse: (response: unknown) => void,
+      ) => {
+        if (!message || typeof message !== "object") {
+          return;
+        }
+
+        const typedMessage = message as {
           type: string;
           filename?: string;
           content?: string;
           mimeType?: string;
           downloadId?: number;
-        },
-        _sender: chrome.runtime.MessageSender,
-        sendResponse: (response: unknown) => void,
-      ) => {
-        if (message.type === "download-file") {
-          const { filename, content, mimeType } = message;
+        };
+
+        if (typedMessage.type === "download-file") {
+          const { filename, content, mimeType } = typedMessage;
 
           const encodeUtf8ToBase64 = (value: string): string => {
             const bytes = new TextEncoder().encode(value);
@@ -82,33 +114,31 @@ export default defineBackground({
 
           const encodedContent = encodeUtf8ToBase64(content || "");
           const dataUrl = `data:${mimeType || "text/plain;charset=utf-8"};base64,${encodedContent}`;
-          browser.downloads.download(
-            {
+          void browser.downloads
+            .download({
               url: dataUrl,
               filename: filename || "download.txt",
               saveAs: false,
-            },
-            (downloadId?: number) => {
-              if (browser.runtime.lastError) {
-                sendResponse({
-                  success: false,
-                  error: browser.runtime.lastError.message,
-                });
-              } else {
-                sendResponse({ success: true, downloadId });
-              }
-            },
-          );
+            })
+            .then((downloadId) => {
+              sendResponse({ success: true, downloadId });
+            })
+            .catch((error: unknown) => {
+              sendResponse({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
           return true; // async response
         }
 
-        if (message.type === "show-download") {
+        if (typedMessage.type === "show-download") {
           try {
-            if (typeof message.downloadId !== "number") {
+            if (typeof typedMessage.downloadId !== "number") {
               sendResponse({ success: false, error: "downloadId is required" });
               return;
             }
-            browser.downloads.show(message.downloadId);
+            browser.downloads.show(typedMessage.downloadId);
             sendResponse({ success: true });
           } catch (e) {
             sendResponse({
