@@ -37,6 +37,7 @@ import {
 import { localizeFileOperationError } from "./file-operation-error";
 import { fetchModelsWithRetry } from "./model-fetch";
 import { readUtf8Stream } from "./stream-reader";
+import { type PendingAction, toPendingPrompt } from "./pending-action";
 import {
   normalizeDownloadRelativePath,
   shouldFallbackToDownloadsFromWorkspaceError,
@@ -177,33 +178,6 @@ function isValidLlmSettings(value: unknown): value is LLMSettings {
   return true;
 }
 
-type PendingAction =
-  | {
-      type: "question";
-      text: string;
-    }
-  | {
-      type: "summarize";
-    };
-
-function toPendingPrompt(action: unknown, lang: Language): string | null {
-  if (!action || typeof action !== "object") {
-    return null;
-  }
-
-  const candidate = action as Partial<PendingAction>;
-  if (candidate.type === "question" && typeof candidate.text === "string") {
-    const text = candidate.text.trim();
-    return text.length > 0 ? text : null;
-  }
-
-  if (candidate.type === "summarize") {
-    return lang === "ja" ? "このページを要約して" : "Summarize this page";
-  }
-
-  return null;
-}
-
 export default function App() {
   const [settings, setSettings] = useState<LLMSettings>(DEFAULT_SETTINGS);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -239,6 +213,7 @@ export default function App() {
   const screenshotPermissionWarnedRef = useRef(false);
   const settingsLoadedRef = useRef(false);
   const pendingPromptDispatchRef = useRef<string | null>(null);
+  const languageRef = useRef<Language>("ja");
 
   // Load settings from storage
   useEffect(() => {
@@ -361,6 +336,41 @@ export default function App() {
         void checkConnection(effectiveServerPort);
       },
     );
+  }, []);
+
+  // Listen for pendingAction changes (e.g. right-click context menu invoked
+  // while the side panel is already open). Without this, the initial mount
+  // useEffect only reads pendingAction once, so subsequent context-menu
+  // triggers are silently dropped.
+  useEffect(() => {
+    languageRef.current = language;
+  }, [language]);
+
+  useEffect(() => {
+    const handler = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      areaName: string,
+    ) => {
+      if (areaName !== "local") {
+        return;
+      }
+      if (!Object.prototype.hasOwnProperty.call(changes, "pendingAction")) {
+        return;
+      }
+      const newValue = changes.pendingAction?.newValue;
+      // Ignore removals (our own cleanup after dispatch).
+      if (newValue === undefined || newValue === null) {
+        return;
+      }
+      const prompt = toPendingPrompt(newValue, languageRef.current);
+      if (prompt) {
+        setPendingPrompt(prompt);
+      }
+    };
+    chrome.storage.onChanged.addListener(handler);
+    return () => {
+      chrome.storage.onChanged.removeListener(handler);
+    };
   }, []);
 
   // Save settings to storage
