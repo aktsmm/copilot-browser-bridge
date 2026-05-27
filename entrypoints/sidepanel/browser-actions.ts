@@ -1,6 +1,7 @@
 import type { BrowserAction, FormField } from "./types";
 import { BRIDGE_CLIENT_HEADERS } from "./constants";
 import { normalizeServerPort } from "./server-port";
+import { normalizeDownloadRelativePath } from "./save-path";
 
 // Playwright MCP availability flag (kept for future integration)
 let playwrightAvailable = false;
@@ -1884,6 +1885,48 @@ export interface FileActionResult {
   error?: string;
 }
 
+export async function downloadTextFile(
+  filename: string,
+  content: string,
+  mimeType = "text/plain;charset=utf-8",
+): Promise<FileActionResult> {
+  return await new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      {
+        type: "download-file",
+        filename,
+        content,
+        mimeType,
+      },
+      (response?: {
+        success?: boolean;
+        downloadId?: number;
+        error?: string;
+      }) => {
+        if (chrome.runtime.lastError) {
+          resolve({
+            success: false,
+            filename,
+            error: chrome.runtime.lastError.message,
+          });
+        } else if (response?.success) {
+          resolve({
+            success: true,
+            filename,
+            downloadId: response.downloadId,
+          });
+        } else {
+          resolve({
+            success: false,
+            filename,
+            error: response?.error || "ダウンロードに失敗しました",
+          });
+        }
+      },
+    );
+  });
+}
+
 // Parse file commands from LLM response
 export function parseFileActionsFromResponse(response: string): FileAction[] {
   const actions: FileAction[] = [];
@@ -1935,43 +1978,12 @@ export async function executeFileAction(
   action: FileAction,
 ): Promise<FileActionResult> {
   try {
-    const filename = action.path.replace(/^[/\\]+/, "").replace(/[/\\]/g, "_");
-
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        {
-          type: "download-file",
-          filename,
-          content: action.content,
-          mimeType: "text/plain;charset=utf-8",
-        },
-        (response?: {
-          success?: boolean;
-          downloadId?: number;
-          error?: string;
-        }) => {
-          if (chrome.runtime.lastError) {
-            resolve({
-              success: false,
-              filename,
-              error: chrome.runtime.lastError.message,
-            });
-          } else if (response?.success) {
-            resolve({
-              success: true,
-              filename,
-              downloadId: response.downloadId,
-            });
-          } else {
-            resolve({
-              success: false,
-              filename,
-              error: response?.error || "ダウンロードに失敗しました",
-            });
-          }
-        },
-      );
-    });
+    const filename = normalizeDownloadRelativePath(action.path);
+    return await downloadTextFile(
+      filename,
+      action.content,
+      "text/plain;charset=utf-8",
+    );
   } catch (error) {
     return {
       success: false,

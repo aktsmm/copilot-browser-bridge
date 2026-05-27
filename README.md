@@ -1,4 +1,4 @@
-# Copilot Browser Bridge (Chrome Extension)
+# GitHub Copilot Browser Bridge (Chrome Extension)
 
 [![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-live-brightgreen?logo=google-chrome)](https://chromewebstore.google.com/detail/copilot-browser-bridge/nggfpdadfepkbpjfnpcihagbnnfpeian)
 [![License CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](LICENSE)
@@ -35,7 +35,7 @@ Available now: [Install from Chrome Web Store](https://chromewebstore.google.com
 
 ## Requirements
 
-- **Required (always)**: [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode)
+- **Required (always)**: [GitHub Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode)
 - **LLM provider**: **GitHub Copilot subscription** (only when using Copilot provider) or **Local LLM** (LM Studio, etc.)
 
 ## Usage
@@ -56,11 +56,20 @@ Available now: [Install from Chrome Web Store](https://chromewebstore.google.com
 
 Configure from the side panel settings button:
 
-- **Provider**: Copilot (Chat) / Copilot (Agent) / LM Studio
+- **Provider**: GitHub Copilot (Chat) / GitHub Copilot (Agent) / LM Studio
 - **Model Selection**: claude-sonnet, gpt-4o, etc.
 - **Operation Mode**: Text / Screenshot / Hybrid
-- **Max Loop Count**: Maximum iterations for automation when using Copilot (Agent)
+- **Max Loop Count**: Maximum iterations for automation when using GitHub Copilot (Agent)
 - **High-Risk Actions / Evaluate**: Optional safety toggles for actions such as `newTab`, `closeTab`, and `evaluate`; Evaluate can only be enabled after high-risk actions are allowed
+- **Save Destination**: Save generated markdown either to the browser downloads folder or to a workspace-relative path via the VS Code bridge
+- **Default Save Path**: Configure a relative base path such as `output/blog`
+
+### Save & Attachments
+
+- **Deterministic save buttons**: The latest assistant response can be saved directly as Markdown or as a blog draft with source URL and timestamp metadata
+- **Workspace fallback**: If workspace-relative save is selected but no VS Code workspace is open, the extension falls back to the browser downloads folder
+- **Drag & drop attachments (v1)**: Attach text files and images directly from the chat input area
+- **PDF fallback**: PDF files are accepted as attachment context, but text extraction is intentionally skipped in v1
 
 If the extension is connected to VS Code but the model list cannot be loaded, fallback models remain visible and the settings panel shows a warning so you can retry refresh instead of mistaking it for a disconnected state.
 
@@ -128,7 +137,7 @@ The extension no longer requests broad static site access. It reads the current 
 
 ## Related Projects
 
-- [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) - Required VS Code extension
+- [GitHub Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) - Required VS Code extension
 
 ## Author
 

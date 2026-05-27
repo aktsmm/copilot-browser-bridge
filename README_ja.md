@@ -1,4 +1,4 @@
-# Copilot Browser Bridge (Chrome Extension)
+# GitHub Copilot Browser Bridge (Chrome Extension)
 
 [![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-live-brightgreen?logo=google-chrome)](https://chromewebstore.google.com/detail/copilot-browser-bridge/nggfpdadfepkbpjfnpcihagbnnfpeian)
 [![License CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](LICENSE)
@@ -35,7 +35,7 @@
 
 ## 📋 必要条件
 
-- **必須（常時）**: [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode)（VS Code拡張機能）
+- **必須（常時）**: [GitHub Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode)（VS Code拡張機能）
 - **LLMプロバイダー**: **GitHub Copilot サブスクリプション**（Copilotプロバイダーを使う場合のみ）または **ローカルLLM**（LM Studio等）
 
 ## 🎮 使い方
@@ -56,11 +56,20 @@
 
 サイドパネルの設定ボタンから以下を設定可能:
 
-- **プロバイダー**: Copilot (Chat) / Copilot (Agent) / LM Studio
+- **プロバイダー**: GitHub Copilot (Chat) / GitHub Copilot (Agent) / LM Studio
 - **モデル選択**: claude-sonnet, gpt-4o など
 - **動作モード**: テキスト / スクリーンショット / ハイブリッド
-- **最大ループ数**: Copilot (Agent) 利用時の自動操作の最大繰り返し回数
+- **最大ループ数**: GitHub Copilot (Agent) 利用時の自動操作の最大繰り返し回数
 - **高リスク操作 / Evaluate操作の許可**: `newTab` / `closeTab` / `evaluate` などの安全トグル。Evaluate は高リスク操作を許可した場合のみ有効化できます
+- **保存先モード**: 生成した Markdown をブラウザのダウンロードフォルダ、または VS Code workspace 相対パスへ保存できます
+- **既定の相対保存パス**: `output/blog` のような既定 path を設定できます
+
+### 保存と添付
+
+- **deterministic 保存ボタン**: 最新の assistant 応答をそのまま Markdown またはブログ下書きとして保存できます
+- **workspace fallback**: workspace 相対保存を選んでいても、VS Code で workspace が開いていない場合はブラウザのダウンロードへフォールバックします
+- **D&D 添付 (v1)**: text ファイルと画像をチャット入力へそのままドロップして添付できます
+- **PDF fallback**: PDF は添付コンテキストとして受け付けますが、v1 では本文抽出を行いません
 
 VS Code とは接続できているのにモデル一覧の取得に失敗した場合でも、設定パネルに警告を表示したうえでフォールバックモデルを継続表示するため、単なる未接続状態と区別できます。
 
@@ -135,7 +144,7 @@ CC BY-NC-SA 4.0 © [aktsmm](https://github.com/aktsmm)
 
 ## 🔗 関連プロジェクト
 
-- [Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) - 必須のVS Code拡張機能
+- [GitHub Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) - 必須のVS Code拡張機能
 
 ## 👤 Author
 

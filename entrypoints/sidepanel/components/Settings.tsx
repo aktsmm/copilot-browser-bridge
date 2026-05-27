@@ -1,5 +1,10 @@
 import React from "react";
-import type { LLMSettings, ModelInfo, OperationMode } from "../types";
+import type {
+  LLMSettings,
+  ModelInfo,
+  OperationMode,
+  SaveDestinationMode,
+} from "../types";
 import type { Language } from "../i18n";
 import { t } from "../i18n";
 import {
@@ -33,6 +38,10 @@ interface SettingsProps {
   onAllowHighRiskActionsChange: (enabled: boolean) => void;
   allowEvaluateAction: boolean;
   onAllowEvaluateActionChange: (enabled: boolean) => void;
+  saveDestinationMode: SaveDestinationMode;
+  onSaveDestinationModeChange: (mode: SaveDestinationMode) => void;
+  saveRelativePath: string;
+  onSaveRelativePathChange: (path: string) => void;
 }
 
 const MIN_AGENT_LOOPS = 1;
@@ -71,6 +80,10 @@ export function Settings({
   onAllowHighRiskActionsChange,
   allowEvaluateAction,
   onAllowEvaluateActionChange,
+  saveDestinationMode,
+  onSaveDestinationModeChange,
+  saveRelativePath,
+  onSaveRelativePathChange,
 }: SettingsProps) {
   const displayModels = buildDisplayedCopilotModels(
     availableModels,
@@ -118,7 +131,7 @@ export function Settings({
               }
               className="text-blue-600"
             />
-            <span>Copilot (Chat)</span>
+            <span>GitHub Copilot (Chat)</span>
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input
@@ -131,7 +144,7 @@ export function Settings({
               className="text-blue-600"
             />
             <div>
-              <span>Copilot (Agent)</span>
+              <span>GitHub Copilot (Agent)</span>
               <p className="text-xs text-gray-500">
                 {t("copilotAgentDesc", language)}
               </p>
@@ -278,6 +291,47 @@ export function Settings({
             className="w-5 h-5 text-blue-600 rounded"
           />
         </label>
+      </div>
+
+      <div className="mb-4 pt-4 border-t">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          {t("saveDestination", language)}
+        </label>
+        <select
+          value={saveDestinationMode}
+          onChange={(e) =>
+            onSaveDestinationModeChange(e.target.value as SaveDestinationMode)
+          }
+          className="w-full p-2 border rounded bg-white"
+          aria-label={t("saveDestination", language)}
+        >
+          <option value="browser-downloads">
+            {t("saveDestinationDownloads", language)}
+          </option>
+          <option value="workspace-relative">
+            {t("saveDestinationWorkspace", language)}
+          </option>
+        </select>
+        <p className="text-xs text-gray-500 mt-1">
+          {t("saveDestinationDesc", language)}
+        </p>
+      </div>
+
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          {t("saveRelativePath", language)}
+        </label>
+        <input
+          type="text"
+          value={saveRelativePath}
+          onChange={(e) => onSaveRelativePathChange(e.target.value)}
+          className="w-full p-2 border rounded"
+          placeholder="output/blog"
+          aria-label={t("saveRelativePath", language)}
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          {t("saveRelativePathDesc", language)}
+        </p>
       </div>
 
       {/* Language Selection */}

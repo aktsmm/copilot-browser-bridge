@@ -5,6 +5,13 @@ import rehypeSanitize from "rehype-sanitize";
 import type { ChatMessage } from "../types";
 import type { Language } from "../i18n";
 import { t } from "../i18n";
+import {
+  buildAttachmentDisplayText,
+  classifyAttachmentFile,
+  MAX_ATTACHMENT_COUNT,
+  truncateAttachmentText,
+  type ChatAttachment,
+} from "../attachments";
 
 type QuickAction = {
   icon: string;
@@ -78,10 +85,12 @@ function getQuickActions(lang: Language): QuickAction[] {
 interface ChatProps {
   messages: ChatMessage[];
   isLoading: boolean;
-  onSendMessage: (message: string) => void;
+  onSendMessage: (message: string, attachments?: ChatAttachment[]) => void;
   onClearMessages: () => void;
   onStopGeneration: () => void;
   language: Language;
+  onSaveMarkdown: () => void;
+  onSaveBlogDraft: () => void;
 }
 
 export function Chat({
@@ -91,10 +100,102 @@ export function Chat({
   onClearMessages,
   onStopGeneration,
   language,
+  onSaveMarkdown,
+  onSaveBlogDraft,
 }: ChatProps) {
   const [input, setInput] = useState("");
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>(
+    [],
+  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const readFileAsText = async (file: File): Promise<string> => {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(file);
+    });
+  };
+
+  const readFileAsDataUrl = async (file: File): Promise<string> => {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const addFiles = async (files: FileList | File[]) => {
+    const nextFiles = Array.from(files);
+    if (nextFiles.length === 0) {
+      return;
+    }
+
+    if (pendingAttachments.length + nextFiles.length > MAX_ATTACHMENT_COUNT) {
+      window.alert(
+        t("attachmentLimitReached", language).replace(
+          "{count}",
+          String(MAX_ATTACHMENT_COUNT),
+        ),
+      );
+      return;
+    }
+
+    const loadedAttachments: ChatAttachment[] = [];
+
+    for (const file of nextFiles) {
+      const classified = classifyAttachmentFile(file);
+      if (!classified.ok) {
+        window.alert(
+          classified.reason === "too-large"
+            ? t("attachmentTooLarge", language)
+            : t("attachmentUnsupported", language),
+        );
+        continue;
+      }
+
+      if (classified.kind === "text") {
+        const textContent = truncateAttachmentText(await readFileAsText(file));
+        loadedAttachments.push({
+          id: `${file.name}-${file.size}-${Date.now()}-${loadedAttachments.length}`,
+          name: file.name,
+          kind: "text",
+          mimeType: file.type || "text/plain",
+          size: file.size,
+          textContent,
+        });
+        continue;
+      }
+
+      if (classified.kind === "image") {
+        const dataUrl = await readFileAsDataUrl(file);
+        loadedAttachments.push({
+          id: `${file.name}-${file.size}-${Date.now()}-${loadedAttachments.length}`,
+          name: file.name,
+          kind: "image",
+          mimeType: file.type || "image/png",
+          size: file.size,
+          dataUrl,
+        });
+        continue;
+      }
+
+      loadedAttachments.push({
+        id: `${file.name}-${file.size}-${Date.now()}-${loadedAttachments.length}`,
+        name: file.name,
+        kind: "pdf",
+        mimeType: file.type || "application/pdf",
+        size: file.size,
+        note: t("pdfAttachmentFallback", language),
+      });
+    }
+
+    setPendingAttachments((prev) => [...prev, ...loadedAttachments]);
+  };
 
   const handleCopy = async (text: string, index: number) => {
     try {
@@ -113,8 +214,9 @@ export function Chat({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim() && !isLoading) {
-      onSendMessage(input);
+      onSendMessage(input, pendingAttachments);
       setInput("");
+      setPendingAttachments([]);
     }
   };
 
@@ -326,6 +428,18 @@ export function Chat({
                           {action.label}
                         </button>
                       ))}
+                      <button
+                        onClick={onSaveMarkdown}
+                        className="text-xs px-2 py-1 rounded bg-blue-100 hover:bg-blue-200 text-blue-800"
+                      >
+                        💾 {t("saveMarkdownAction", language)}
+                      </button>
+                      <button
+                        onClick={onSaveBlogDraft}
+                        className="text-xs px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 text-amber-800"
+                      >
+                        📝 {t("saveBlogDraftAction", language)}
+                      </button>
                     </div>
                   )}
               </div>
@@ -336,8 +450,81 @@ export function Chat({
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="p-4 bg-white border-t">
+      <form
+        onSubmit={handleSubmit}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          void addFiles(e.dataTransfer.files);
+        }}
+        className="p-4 bg-white border-t"
+      >
+        {pendingAttachments.length > 0 && (
+          <div className="mb-3 rounded border border-gray-200 bg-gray-50 p-3">
+            <div className="mb-2 text-xs font-medium text-gray-600">
+              {t("attachedFiles", language)}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {pendingAttachments.map((attachment) => (
+                <div
+                  key={attachment.id}
+                  className="flex items-center gap-2 rounded bg-white px-2 py-1 text-xs text-gray-700 shadow-sm"
+                >
+                  <span>
+                    {attachment.kind === "image"
+                      ? "🖼️"
+                      : attachment.kind === "pdf"
+                        ? "📄"
+                        : "📎"}
+                  </span>
+                  <span>{attachment.name}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPendingAttachments((prev) =>
+                        prev.filter((item) => item.id !== attachment.id),
+                      )
+                    }
+                    className="text-gray-400 hover:text-red-500"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 text-xs text-gray-500">
+              {buildAttachmentDisplayText(pendingAttachments, {
+                heading: t("attachedFiles", language),
+                pdfNote: t("pdfAttachmentFallback", language),
+                textLabel: t("attachmentTextLabel", language),
+                imageLabel: t("attachmentImageLabel", language),
+              }).replace(/^\n\n/, "")}
+            </div>
+          </div>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          onChange={(e) => {
+            if (e.target.files) {
+              void addFiles(e.target.files);
+              e.target.value = "";
+            }
+          }}
+          className="hidden"
+        />
+
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="px-3 py-2 rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            title={t("dropFilesHere", language)}
+          >
+            {t("attachFiles", language)}
+          </button>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}

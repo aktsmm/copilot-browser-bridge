@@ -3,7 +3,7 @@ export type Language = "ja" | "en";
 export const translations = {
   ja: {
     // Header
-    appTitle: "🤖 Copilot Bridge",
+    appTitle: "🤖 GitHub Copilot Browser Bridge",
     reconnect: "再接続",
     settings: "設定",
 
@@ -48,15 +48,50 @@ export const translations = {
     base64DecodeError: "Base64デコードエラー: {path}",
     downloadComplete: "ダウンロード完了",
     downloadDestination: "保存先: ブラウザのダウンロードフォルダ",
+    saveDestination: "保存先モード",
+    saveDestinationDesc: "生成ファイルの保存先を選びます",
+    saveDestinationDownloads: "ブラウザのダウンロードフォルダ",
+    saveDestinationWorkspace: "VS Code ワークスペース相対",
+    saveRelativePath: "既定の相対保存パス",
+    saveRelativePathDesc:
+      "例: output/blog。未設定またはワークスペース未オープン時はブラウザのダウンロードへ保存します。",
+    saveMarkdownAction: "保存",
+    saveBlogDraftAction: "ブログ用に保存",
+    attachFiles: "添付",
+    attachedFiles: "添付ファイル",
+    attachmentTextLabel: "テキスト",
+    attachmentImageLabel: "画像",
+    dropFilesHere: "ここにファイルをドロップ",
+    attachmentUnsupported:
+      "このファイル形式は未対応です。text / image / pdf を使ってください。",
+    attachmentTooLarge: "ファイルが大きすぎます。サイズを小さくして再試行してください。",
+    attachmentLimitReached: "添付は最大 {count} 件までです。",
+    pdfAttachmentFallback:
+      "PDF は v1 では本文抽出しません。ファイル名のみコンテキストに含めます。",
+    screenshotAttachedContext:
+      "[スクリーンショット添付済み - 画像を見て現在の状態を理解してください]",
+    screenshotAttachedShort: "[スクリーンショット添付済み]",
+    saveSuccess: "保存しました: {path}",
+    saveFailure: "保存に失敗しました: {reason}",
+    saveFailureUnknownReason: "不明なエラー",
+    saveFailureNoAssistantResponse: "保存対象の assistant 応答がありません",
+    saveFailureInvalidPath: "保存パスが不正です",
+    saveFailurePathEscapesWorkspace:
+      "保存パスがワークスペースの外を指しています",
+    saveFailureNotAFile: "保存先がファイルではありません",
+    saveFailureFileAlreadyExists: "同名のファイルが既に存在します",
+    savedToWorkspace: "保存先: VS Code ワークスペース",
+    savedToDownloads: "保存先: ブラウザのダウンロードフォルダ",
 
     // Settings
     settingsTitle: "設定",
     provider: "プロバイダー",
     model: "モデル",
     refresh: "🔄 更新",
-    modelNotConnected: "※ VS Code未接続のため既定モデル表示中",
+    modelNotConnected:
+      "※ VS Code未接続のため GitHub Copilot の既定モデルを表示中",
     modelFetchFailed:
-      "⚠️ VS Code への接続はありますが、モデル一覧の取得に失敗しました。更新を再試行してください。",
+      "⚠️ VS Code への接続はありますが、GitHub Copilot のモデル一覧取得に失敗しました。更新を再試行してください。",
     endpoint: "エンドポイント",
     modelName: "モデル名 (空欄で自動検出)",
     browserActions: "ブラウザ操作",
@@ -74,12 +109,12 @@ export const translations = {
       "高リスク操作。必要時のみ有効化し、意図しないスクリプト実行に注意してください。",
     allowEvaluateActionDisabledHint:
       "「高リスク操作を許可」が無効の間は Evaluate 操作を変更できません。",
-    copilotAgentDesc: "@workspace, ツール使用可",
+    copilotAgentDesc: "GitHub Copilot Agent, @workspace, ツール使用可",
     modelSelectAria: "モデル選択",
   },
   en: {
     // Header
-    appTitle: "🤖 Copilot Bridge",
+    appTitle: "🤖 GitHub Copilot Browser Bridge",
     reconnect: "Reconnect",
     settings: "Settings",
 
@@ -124,15 +159,52 @@ export const translations = {
     base64DecodeError: "Base64 decode error: {path}",
     downloadComplete: "Download complete",
     downloadDestination: "Saved to: browser downloads folder",
+    saveDestination: "Save Destination",
+    saveDestinationDesc: "Choose where generated files should be saved",
+    saveDestinationDownloads: "Browser downloads folder",
+    saveDestinationWorkspace: "VS Code workspace-relative",
+    saveRelativePath: "Default relative save path",
+    saveRelativePathDesc:
+      "Example: output/blog. If empty or no workspace is open, files fall back to browser downloads.",
+    saveMarkdownAction: "Save",
+    saveBlogDraftAction: "Save for Blog",
+    attachFiles: "Attach",
+    attachedFiles: "Attached files",
+    attachmentTextLabel: "text",
+    attachmentImageLabel: "image",
+    dropFilesHere: "Drop files here",
+    attachmentUnsupported:
+      "This file type is not supported yet. Use text, image, or PDF files.",
+    attachmentTooLarge:
+      "The file is too large. Reduce the size and try again.",
+    attachmentLimitReached: "You can attach up to {count} files.",
+    pdfAttachmentFallback:
+      "PDF text extraction is not included in v1. Only the file name will be sent as context.",
+    screenshotAttachedContext:
+      "[Screenshot attached - use the image to understand the current page state]",
+    screenshotAttachedShort: "[Screenshot attached]",
+    saveSuccess: "Saved: {path}",
+    saveFailure: "Save failed: {reason}",
+    saveFailureUnknownReason: "Unknown error",
+    saveFailureNoAssistantResponse: "No assistant response is available to save",
+    saveFailureInvalidPath: "The save path is invalid",
+    saveFailurePathEscapesWorkspace:
+      "The save path points outside the workspace",
+    saveFailureNotAFile: "The target save path is not a file",
+    saveFailureFileAlreadyExists:
+      "A file with the same name already exists",
+    savedToWorkspace: "Saved to: VS Code workspace",
+    savedToDownloads: "Saved to: browser downloads folder",
 
     // Settings
     settingsTitle: "Settings",
     provider: "Provider",
     model: "Model",
     refresh: "🔄 Refresh",
-    modelNotConnected: "※ Default models (VS Code not connected)",
+    modelNotConnected:
+      "※ Showing default GitHub Copilot models (VS Code not connected)",
     modelFetchFailed:
-      "⚠️ Connected to VS Code, but failed to load the model list. Please refresh and try again.",
+      "⚠️ Connected to VS Code, but failed to load the GitHub Copilot model list. Please refresh and try again.",
     endpoint: "Endpoint",
     modelName: "Model name (auto-detect if empty)",
     browserActions: "Browser Actions",
@@ -150,7 +222,7 @@ export const translations = {
       "High-risk operation. Enable only when needed and review generated scripts carefully.",
     allowEvaluateActionDisabledHint:
       'You cannot change Evaluate while "Allow High-Risk Actions" is disabled.',
-    copilotAgentDesc: "@workspace, tools enabled",
+    copilotAgentDesc: "GitHub Copilot Agent, @workspace, tools enabled",
     modelSelectAria: "Model selection",
   },
 };

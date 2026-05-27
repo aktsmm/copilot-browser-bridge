@@ -1,4 +1,5 @@
 export type OperationMode = "text" | "hybrid" | "screenshot";
+export type SaveDestinationMode = "browser-downloads" | "workspace-relative";
 
 export interface LLMSettings {
   provider: "copilot" | "copilot-agent" | "lm-studio";
@@ -22,6 +23,7 @@ export interface ChatRequest {
   pageContent: string;
   enableBrowserActions?: boolean;
   enableFileOperations?: boolean;
+  attachments?: import("./attachments").ChatAttachment[];
 }
 
 export interface ModelInfo {

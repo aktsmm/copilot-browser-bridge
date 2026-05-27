@@ -7,14 +7,15 @@ import type {
   ModelInfo,
   OperationMode,
   BrowserAction,
+  SaveDestinationMode,
 } from "./types";
 import {
   executeBrowserAction,
   parseActionsFromResponse,
   parseFileActionsFromResponse,
-  executeFileAction,
   captureScreenshot,
   setEvaluateActionEnabled,
+  downloadTextFile,
 } from "./browser-actions";
 import type { Language } from "./i18n";
 import { t } from "./i18n";
@@ -24,7 +25,22 @@ import {
   shouldEnableScreenshotFallback,
   shouldStopAutonomousLoopAfterFailures,
 } from "./agent-loop-policy";
+import {
+  buildArtifactRelativePath,
+  buildBlogDraftContent,
+  buildSavedMarkdownContent,
+} from "./artifact-template";
+import {
+  buildAttachmentDisplayText,
+  type ChatAttachment,
+} from "./attachments";
+import { localizeFileOperationError } from "./file-operation-error";
+import { fetchModelsWithRetry } from "./model-fetch";
 import { readUtf8Stream } from "./stream-reader";
+import {
+  normalizeDownloadRelativePath,
+  shouldFallbackToDownloadsFromWorkspaceError,
+} from "./save-path";
 
 const DEFAULT_SETTINGS: LLMSettings = {
   provider: "copilot-agent",
@@ -40,6 +56,7 @@ const DEFAULT_SETTINGS: LLMSettings = {
 const DEFAULT_AGENT_LOOPS = 500;
 const MIN_AGENT_LOOPS = 1;
 const MAX_AGENT_LOOPS = 1000;
+const DEFAULT_SAVE_RELATIVE_PATH = "output/blog";
 const LEGACY_FULL_AUTO_MIGRATION_KEY = "fullAutoMigratedV1";
 const FULL_AUTO_MIGRATION_VERSION_KEY = "fullAutoMigrationVersion";
 const FULL_AUTO_MIGRATION_TARGET_VERSION = 2;
@@ -205,6 +222,11 @@ export default function App() {
   const [serverPort, setServerPort] = useState(DEFAULT_SERVER_PORT);
   const [allowHighRiskActions, setAllowHighRiskActions] = useState(true);
   const [allowEvaluateAction, setAllowEvaluateAction] = useState(true);
+  const [saveDestinationMode, setSaveDestinationMode] =
+    useState<SaveDestinationMode>("browser-downloads");
+  const [saveRelativePath, setSaveRelativePath] = useState(
+    DEFAULT_SAVE_RELATIVE_PATH,
+  );
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const inFlightRequestRef = useRef(false);
@@ -225,6 +247,8 @@ export default function App() {
         "serverPort",
         "allowHighRiskActions",
         "allowEvaluateAction",
+        "saveDestinationMode",
+        "saveRelativePath",
         FULL_AUTO_MIGRATION_VERSION_KEY,
         LEGACY_FULL_AUTO_MIGRATION_KEY,
         "pendingAction",
@@ -239,6 +263,8 @@ export default function App() {
         serverPort?: number;
         allowHighRiskActions?: boolean;
         allowEvaluateAction?: boolean;
+        saveDestinationMode?: SaveDestinationMode;
+        saveRelativePath?: string;
         fullAutoMigrationVersion?: number;
         fullAutoMigratedV1?: boolean;
         pendingAction?: PendingAction;
@@ -287,6 +313,15 @@ export default function App() {
         } else if (typeof result.allowEvaluateAction === "boolean") {
           effectiveAllowEvaluateAction = result.allowEvaluateAction;
           setAllowEvaluateAction(result.allowEvaluateAction);
+        }
+        if (
+          result.saveDestinationMode === "browser-downloads" ||
+          result.saveDestinationMode === "workspace-relative"
+        ) {
+          setSaveDestinationMode(result.saveDestinationMode);
+        }
+        if (typeof result.saveRelativePath === "string") {
+          setSaveRelativePath(result.saveRelativePath || DEFAULT_SAVE_RELATIVE_PATH);
         }
 
         if (shouldForceFullAutoMigration) {
@@ -340,6 +375,8 @@ export default function App() {
       serverPort,
       allowHighRiskActions,
       allowEvaluateAction,
+      saveDestinationMode,
+      saveRelativePath,
     });
   }, [
     settings,
@@ -351,6 +388,8 @@ export default function App() {
     serverPort,
     allowHighRiskActions,
     allowEvaluateAction,
+    saveDestinationMode,
+    saveRelativePath,
   ]);
 
   useEffect(() => {
@@ -360,6 +399,12 @@ export default function App() {
   const getBridgeBaseUrl = (overridePort?: number) => {
     const targetPort = normalizeServerPort(overridePort ?? serverPort);
     return `http://localhost:${targetPort}`;
+  };
+
+  const getExtensionOrigin = () => {
+    return chrome.runtime?.id
+      ? `chrome-extension://${chrome.runtime.id}`
+      : "chrome-extension://unknown";
   };
 
   const checkConnection = async (overridePort?: number) => {
@@ -401,16 +446,15 @@ export default function App() {
   };
 
   const fetchAvailableModels = async (overridePort?: number) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
     try {
-      const response = await fetch(`${getBridgeBaseUrl(overridePort)}/models`, {
+      const result = await fetchModelsWithRetry({
+        baseUrl: getBridgeBaseUrl(overridePort),
         headers: BRIDGE_CLIENT_HEADERS,
-        signal: controller.signal,
+        extensionOrigin: getExtensionOrigin(),
       });
-      if (response.ok) {
-        const models = await response.json();
-        setAvailableModels(models);
+
+      if (result.ok) {
+        setAvailableModels(result.models);
         setModelFetchFailed(false);
         setModelFetchErrorDetail(null);
         setSettings((currentSettings) => {
@@ -423,7 +467,7 @@ export default function App() {
 
           const resolvedModel = resolveSelectedCopilotModel(
             currentSettings.copilot.model,
-            models,
+            result.models,
           );
 
           if (resolvedModel === currentSettings.copilot.model) {
@@ -441,14 +485,8 @@ export default function App() {
       } else {
         setAvailableModels([]);
         setModelFetchFailed(true);
-        setModelFetchErrorDetail(
-          `Model list request failed (${response.status} ${response.statusText})`,
-        );
-        console.error(
-          "Failed to fetch models",
-          response.status,
-          response.statusText,
-        );
+        setModelFetchErrorDetail(result.errorDetail);
+        console.error("Failed to fetch models", result.errorDetail);
       }
     } catch (error) {
       setAvailableModels([]);
@@ -457,8 +495,6 @@ export default function App() {
         error instanceof Error ? error.message : String(error),
       );
       console.error("Failed to fetch models");
-    } finally {
-      clearTimeout(timeout);
     }
   };
 
@@ -479,6 +515,226 @@ export default function App() {
     setServerPort(normalizedPort);
     chrome.storage.local.set({ serverPort: normalizedPort });
     void checkConnection(normalizedPort);
+  };
+
+  const postFileOperation = async (
+    action: "create" | "append",
+    path: string,
+    content: string,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const response = await fetch(`${getBridgeBaseUrl()}/file`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...BRIDGE_CLIENT_HEADERS,
+        },
+        body: JSON.stringify({
+          action,
+          path,
+          content,
+        }),
+      });
+
+      if (response.ok) {
+        return { ok: true };
+      }
+
+      const payload = (await response.text()).trim();
+      try {
+        const parsed = JSON.parse(payload) as { error?: string };
+        return {
+          ok: false,
+          error: parsed.error || payload || response.statusText,
+        };
+      } catch {
+        return { ok: false, error: payload || response.statusText };
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
+  const withTimestampSuffix = (path: string) => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const lastSlash = path.lastIndexOf("/");
+    const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : "";
+    const filename = lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
+    const lastDot = filename.lastIndexOf(".");
+    if (lastDot <= 0) {
+      return `${directory}${filename}-${timestamp}`;
+    }
+    return `${directory}${filename.slice(0, lastDot)}-${timestamp}${filename.slice(lastDot)}`;
+  };
+
+  const saveTextArtifact = async (options: {
+    relativePath: string;
+    content: string;
+    mimeType?: string;
+  }) => {
+    const normalizedPath = normalizeDownloadRelativePath(options.relativePath);
+
+    if (saveDestinationMode === "workspace-relative") {
+      let targetPath = normalizedPath;
+      let workspaceResult = await postFileOperation(
+        "create",
+        targetPath,
+        options.content,
+      );
+
+      if (!workspaceResult.ok && workspaceResult.error?.includes("File already exists")) {
+        targetPath = withTimestampSuffix(targetPath);
+        workspaceResult = await postFileOperation(
+          "create",
+          targetPath,
+          options.content,
+        );
+      }
+
+      if (workspaceResult.ok) {
+        return {
+          success: true,
+          filename: targetPath,
+          destinationMessage: t("savedToWorkspace", language),
+        };
+      }
+
+      if (shouldFallbackToDownloadsFromWorkspaceError(workspaceResult.error)) {
+        const downloadResult = await downloadTextFile(
+          normalizedPath,
+          options.content,
+          options.mimeType || "text/markdown;charset=utf-8",
+        );
+        return {
+          success: downloadResult.success,
+          filename: downloadResult.filename,
+          downloadId: downloadResult.downloadId,
+          error: downloadResult.error,
+          destinationMessage: t("savedToDownloads", language),
+        };
+      }
+
+      return {
+        success: false,
+        filename: normalizedPath,
+        error: localizeFileOperationError(workspaceResult.error, {
+          invalidPath: t("saveFailureInvalidPath", language),
+          pathEscapesWorkspace: t(
+            "saveFailurePathEscapesWorkspace",
+            language,
+          ),
+          notAFile: t("saveFailureNotAFile", language),
+          fileAlreadyExists: t("saveFailureFileAlreadyExists", language),
+        }),
+      };
+    }
+
+    const downloadResult = await downloadTextFile(
+      normalizedPath,
+      options.content,
+      options.mimeType || "text/markdown;charset=utf-8",
+    );
+
+    return {
+      success: downloadResult.success,
+      filename: downloadResult.filename,
+      downloadId: downloadResult.downloadId,
+      error: downloadResult.error,
+      destinationMessage: t("savedToDownloads", language),
+    };
+  };
+
+  const getLatestAssistantMessage = () => {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (messages[index].role === "assistant") {
+        return messages[index].content;
+      }
+    }
+    return "";
+  };
+
+  const getCurrentPageMetadata = async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return {
+      pageTitle: tab?.title || "Untitled Page",
+      pageUrl: tab?.url || "",
+    };
+  };
+
+  const pushSaveResultMessage = (result: {
+    success: boolean;
+    filename: string;
+    error?: string;
+    downloadId?: number;
+    destinationMessage?: string;
+  }) => {
+    if (result.success) {
+      const showLink = result.downloadId
+        ? ` ([${t("showInFolder", language)}](download-show:${result.downloadId}))`
+        : "";
+      setMessages((prev: ChatMessage[]) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `📥 ${t("saveSuccess", language).replace("{path}", result.filename)}${showLink}\n\n📂 ${result.destinationMessage}`,
+        },
+      ]);
+      return;
+    }
+
+    setMessages((prev: ChatMessage[]) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: `⚠️ ${t("saveFailure", language).replace("{reason}", result.error || t("saveFailureUnknownReason", language))}`,
+      },
+    ]);
+  };
+
+  const saveLatestAssistantMarkdown = async (kind: "summary" | "blog-draft") => {
+    const assistantContent = getLatestAssistantMessage().trim();
+    if (!assistantContent) {
+      pushSaveResultMessage({
+        success: false,
+        filename: "",
+        error: t("saveFailureNoAssistantResponse", language),
+      });
+      return;
+    }
+
+    const createdAt = new Date();
+    const { pageTitle, pageUrl } = await getCurrentPageMetadata();
+    const relativePath = buildArtifactRelativePath(
+      saveRelativePath || DEFAULT_SAVE_RELATIVE_PATH,
+      pageTitle,
+      kind,
+      createdAt,
+    );
+
+    const content =
+      kind === "blog-draft"
+        ? buildBlogDraftContent({
+            pageTitle,
+            pageUrl,
+            assistantContent,
+            createdAt,
+          })
+        : buildSavedMarkdownContent({
+            pageTitle,
+            pageUrl,
+            assistantContent,
+            createdAt,
+          });
+
+    const result = await saveTextArtifact({
+      relativePath,
+      content,
+      mimeType: "text/markdown;charset=utf-8",
+    });
+    pushSaveResultMessage(result);
   };
 
   const maybeWarnScreenshotPermission = (error: unknown) => {
@@ -867,7 +1123,10 @@ export default function App() {
     }
   };
 
-  const sendMessage = async (userMessage: string) => {
+  const sendMessage = async (
+    userMessage: string,
+    attachments: ChatAttachment[] = [],
+  ) => {
     if (!userMessage.trim() || isLoading || inFlightRequestRef.current) return;
 
     inFlightRequestRef.current = true;
@@ -881,7 +1140,12 @@ export default function App() {
 
     const newUserMessage: ChatMessage = {
       role: "user",
-      content: userMessage,
+      content: `${userMessage}${buildAttachmentDisplayText(attachments, {
+        heading: t("attachedFiles", language),
+        pdfNote: t("pdfAttachmentFallback", language),
+        textLabel: t("attachmentTextLabel", language),
+        imageLabel: t("attachmentImageLabel", language),
+      })}`.trim(),
     };
 
     setMessages((prev: ChatMessage[]) => [...prev, newUserMessage]);
@@ -901,7 +1165,7 @@ export default function App() {
           screenshotBase64 = await captureScreenshot();
           // Also get DOM elements for ref-based clicking
           const domContent = await extractPageContent({ mode: "interactive" });
-          pageContent = `[Screenshot attached - use image for visual understanding]\n\n${domContent}`;
+          pageContent = `${t("screenshotAttachedContext", language)}\n\n${domContent}`;
         } catch (e) {
           console.error("Screenshot failed:", e);
           maybeWarnScreenshotPermission(e);
@@ -928,6 +1192,7 @@ export default function App() {
           pageContent,
           screenshot: screenshotBase64 || undefined,
           operationMode,
+          attachments,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -1185,7 +1450,7 @@ export default function App() {
               const domContent = await extractPageContent({
                 mode: "interactive",
               });
-              updatedPageContent = `[Screenshot attached]\n\n${domContent}`;
+              updatedPageContent = `${t("screenshotAttachedShort", language)}\n\n${domContent}`;
               console.log("[Agent] Screenshot captured for fallback mode");
             } catch (e) {
               console.error("Screenshot fallback failed:", e);
@@ -1233,6 +1498,7 @@ export default function App() {
                 operationMode: useScreenshotFallback
                   ? "screenshot"
                   : operationMode,
+                attachments: [],
               }),
               signal: loopAbortController.signal,
             });
@@ -1357,13 +1623,10 @@ export default function App() {
 
             try {
               const content = decodeBase64Utf8(b64Content);
-              const filename = filePath
-                .replace(/^[/\\]+/, "")
-                .replace(/[/\\]/g, "_");
-              const result = await executeFileAction({
-                type: "create",
-                path: filename,
+              const result = await saveTextArtifact({
+                relativePath: filePath,
                 content,
+                mimeType: "text/plain;charset=utf-8",
               });
               if (result.success) {
                 const showLink = result.downloadId
@@ -1392,7 +1655,11 @@ export default function App() {
             }
             processedFileMarkers.add(markerKey);
 
-            const result = await executeFileAction(action);
+            const result = await saveTextArtifact({
+              relativePath: action.path,
+              content: action.content,
+              mimeType: "text/plain;charset=utf-8",
+            });
             if (result.success) {
               const showLink = result.downloadId
                 ? ` ([${t("showInFolder", language)}](download-show:${result.downloadId}))`
@@ -1564,6 +1831,10 @@ export default function App() {
           onAllowHighRiskActionsChange={setAllowHighRiskActions}
           allowEvaluateAction={allowEvaluateAction}
           onAllowEvaluateActionChange={setAllowEvaluateAction}
+          saveDestinationMode={saveDestinationMode}
+          onSaveDestinationModeChange={setSaveDestinationMode}
+          saveRelativePath={saveRelativePath}
+          onSaveRelativePathChange={setSaveRelativePath}
         />
       )}
 
@@ -1578,6 +1849,12 @@ export default function App() {
         }}
         onStopGeneration={stopGeneration}
         language={language}
+        onSaveMarkdown={() => {
+          void saveLatestAssistantMarkdown("summary");
+        }}
+        onSaveBlogDraft={() => {
+          void saveLatestAssistantMarkdown("blog-draft");
+        }}
       />
     </div>
   );
