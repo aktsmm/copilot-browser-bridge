@@ -1,5 +1,6 @@
 // Background Script - Service Worker
 // サイドパネルの開閉制御、コンテキストメニュー
+import { isValidDownloadId } from "./sidepanel/download-id";
 
 export default defineBackground({
   type: "module",
@@ -172,8 +173,11 @@ export default defineBackground({
 
         if (typedMessage.type === "show-download") {
           try {
-            if (typeof typedMessage.downloadId !== "number") {
-              sendResponse({ success: false, error: "downloadId is required" });
+            if (!isValidDownloadId(typedMessage.downloadId)) {
+              sendResponse({
+                success: false,
+                error: "valid downloadId is required",
+              });
               return;
             }
             browser.downloads.show(typedMessage.downloadId);

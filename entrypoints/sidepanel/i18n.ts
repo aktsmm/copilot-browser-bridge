@@ -9,7 +9,7 @@ export const translations = {
 
     // Connection
     connectionError:
-      "⚠️ VS Codeとの接続に失敗しました。VS Codeが起動しているか確認してください。",
+      "⚠️ ローカル bridge との接続に失敗しました。VS Code 拡張または standalone bridge が起動しているか確認してください。",
     reconnectLink: "再接続",
 
     // Chat
@@ -25,6 +25,8 @@ export const translations = {
     copied: "コピー済み",
     screenshotPermissionWarning:
       "⚠️ スクリーンショット権限が未付与です。拡張機能アイコンを一度クリックするか、権限変更後は拡張を削除→再インストールしてください。",
+    screenshotFallbackFailed:
+      "⚠️ スクリーンショット取得に失敗したため、テキストモードで続行します。",
     emptyServerResponse:
       "⚠️ サーバーから空の応答が返されました。もう一度お試しください。",
     emptyContinuationResponse:
@@ -51,20 +53,21 @@ export const translations = {
     saveDestination: "保存先モード",
     saveDestinationDesc: "生成ファイルの保存先を選びます",
     saveDestinationDownloads: "ブラウザのダウンロードフォルダ",
-    saveDestinationWorkspace: "VS Code ワークスペース相対",
+    saveDestinationWorkspace: "bridge workspace-root 相対",
     saveRelativePath: "既定の相対保存パス",
     saveRelativePathDesc:
-      "例: output/blog。未設定またはワークスペース未オープン時はブラウザのダウンロードへ保存します。",
-    saveMarkdownAction: "保存",
-    saveBlogDraftAction: "ブログ用に保存",
+      "例: output/blog。未設定または bridge に workspace-root がない時はブラウザのダウンロードへ保存します。",
+    saveMarkdownAction: "この回答を保存",
+    saveBlogDraftAction: "ブログ下書き保存",
     attachFiles: "添付",
     attachedFiles: "添付ファイル",
     attachmentTextLabel: "テキスト",
     attachmentImageLabel: "画像",
-    dropFilesHere: "ここにファイルをドロップ",
+    dropFilesHere: "ここにファイルをドロップして添付",
     attachmentUnsupported:
       "このファイル形式は未対応です。text / image / pdf を使ってください。",
-    attachmentTooLarge: "ファイルが大きすぎます。サイズを小さくして再試行してください。",
+    attachmentTooLarge:
+      "ファイルが大きすぎます。サイズを小さくして再試行してください。",
     attachmentLimitReached: "添付は最大 {count} 件までです。",
     pdfAttachmentFallback:
       "PDF は v1 では本文抽出しません。ファイル名のみコンテキストに含めます。",
@@ -80,7 +83,7 @@ export const translations = {
       "保存パスがワークスペースの外を指しています",
     saveFailureNotAFile: "保存先がファイルではありません",
     saveFailureFileAlreadyExists: "同名のファイルが既に存在します",
-    savedToWorkspace: "保存先: VS Code ワークスペース",
+    savedToWorkspace: "保存先: bridge workspace-root",
     savedToDownloads: "保存先: ブラウザのダウンロードフォルダ",
 
     // Settings
@@ -100,7 +103,7 @@ export const translations = {
     fileOperationsDesc: "AIがワークスペースにファイル作成",
     language: "言語",
     serverPort: "サーバーポート",
-    serverPortDesc: "VS Code拡張サーバーの接続先ポート (1-65535)",
+    serverPortDesc: "ローカル bridge server の接続先ポート (1-65535)",
     allowHighRiskActions: "高リスク操作を許可",
     allowHighRiskActionsDesc:
       "newTab / closeTab / Playwright browser_evaluate などの高リスク操作を実行可能にします。無効時は自動実行しません。",
@@ -120,7 +123,7 @@ export const translations = {
 
     // Connection
     connectionError:
-      "⚠️ Failed to connect to VS Code. Please check if VS Code is running.",
+      "⚠️ Failed to connect to the local bridge. Check that the VS Code extension or standalone bridge is running.",
     reconnectLink: "Reconnect",
 
     // Chat
@@ -136,6 +139,8 @@ export const translations = {
     copied: "Copied",
     screenshotPermissionWarning:
       "⚠️ Screenshot permission is not granted. Click the extension icon once, or reinstall the extension after changing permissions.",
+    screenshotFallbackFailed:
+      "⚠️ Screenshot capture failed, so the bridge will continue in text mode.",
     emptyServerResponse:
       "⚠️ Server returned an empty response. Please try again.",
     emptyContinuationResponse:
@@ -162,21 +167,20 @@ export const translations = {
     saveDestination: "Save Destination",
     saveDestinationDesc: "Choose where generated files should be saved",
     saveDestinationDownloads: "Browser downloads folder",
-    saveDestinationWorkspace: "VS Code workspace-relative",
+    saveDestinationWorkspace: "bridge workspace-root relative",
     saveRelativePath: "Default relative save path",
     saveRelativePathDesc:
-      "Example: output/blog. If empty or no workspace is open, files fall back to browser downloads.",
-    saveMarkdownAction: "Save",
-    saveBlogDraftAction: "Save for Blog",
+      "Example: output/blog. If empty or the bridge has no workspace root, files fall back to browser downloads.",
+    saveMarkdownAction: "Save this answer",
+    saveBlogDraftAction: "Save blog draft",
     attachFiles: "Attach",
     attachedFiles: "Attached files",
     attachmentTextLabel: "text",
     attachmentImageLabel: "image",
-    dropFilesHere: "Drop files here",
+    dropFilesHere: "Drop files here to attach",
     attachmentUnsupported:
       "This file type is not supported yet. Use text, image, or PDF files.",
-    attachmentTooLarge:
-      "The file is too large. Reduce the size and try again.",
+    attachmentTooLarge: "The file is too large. Reduce the size and try again.",
     attachmentLimitReached: "You can attach up to {count} files.",
     pdfAttachmentFallback:
       "PDF text extraction is not included in v1. Only the file name will be sent as context.",
@@ -186,14 +190,14 @@ export const translations = {
     saveSuccess: "Saved: {path}",
     saveFailure: "Save failed: {reason}",
     saveFailureUnknownReason: "Unknown error",
-    saveFailureNoAssistantResponse: "No assistant response is available to save",
+    saveFailureNoAssistantResponse:
+      "No assistant response is available to save",
     saveFailureInvalidPath: "The save path is invalid",
     saveFailurePathEscapesWorkspace:
       "The save path points outside the workspace",
     saveFailureNotAFile: "The target save path is not a file",
-    saveFailureFileAlreadyExists:
-      "A file with the same name already exists",
-    savedToWorkspace: "Saved to: VS Code workspace",
+    saveFailureFileAlreadyExists: "A file with the same name already exists",
+    savedToWorkspace: "Saved to: bridge workspace root",
     savedToDownloads: "Saved to: browser downloads folder",
 
     // Settings
@@ -213,7 +217,7 @@ export const translations = {
     fileOperationsDesc: "AI creates files in workspace",
     language: "Language",
     serverPort: "Server Port",
-    serverPortDesc: "Target port of the VS Code bridge server (1-65535)",
+    serverPortDesc: "Target port of the local bridge server (1-65535)",
     allowHighRiskActions: "Allow High-Risk Actions",
     allowHighRiskActionsDesc:
       "Allows high-risk actions such as newTab / closeTab / Playwright browser_evaluate. When disabled, these actions are not executed.",

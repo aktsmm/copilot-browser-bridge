@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeSanitize from "rehype-sanitize";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import type { Options as RehypeSanitizeOptions } from "rehype-sanitize";
 import type { ChatMessage } from "../types";
 import type { Language } from "../i18n";
 import { t } from "../i18n";
@@ -16,11 +17,20 @@ import {
   getSummarizeAndSavePrompt,
   getSummarizePrompt,
 } from "../pending-action";
+import { getDownloadShowId } from "../download-id";
 
 type QuickAction = {
   icon: string;
   label: string;
   prompt: string;
+};
+
+export const markdownSanitizeSchema: RehypeSanitizeOptions = {
+  ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href || []), "download-show"],
+  },
 };
 
 // Collapse tool execution logs into compact markdown blocks
@@ -68,10 +78,10 @@ export function getQuickActions(lang: Language): QuickAction[] {
             "このページ内容を踏まえ、次に取るべき行動を3つ提案してください。各提案は「目的」「理由」「最初の一手」を1行ずつで簡潔に書いてください。新しいブラウザ操作やページ遷移はしないでください。",
         },
         {
-          icon: "💾",
-          label: "MD保存",
+          icon: "🧹",
+          label: "整える",
           prompt:
-            "直前の回答をMarkdownとして保存してください。見出し、箇条書き、出典URLが分かる形に整え、本文を新たに作り直さないでください。新しいブラウザ操作やページ遷移はしないでください。",
+            "直前の回答を、内容は変えずに読みやすいMarkdownへ整えてください。見出し、箇条書き、出典URLが分かる形にし、保存や新しいブラウザ操作やページ遷移はしないでください。",
         },
       ]
     : [
@@ -94,10 +104,10 @@ export function getQuickActions(lang: Language): QuickAction[] {
             "Based on this page, suggest three next steps. For each step, include the goal, why it matters, and the first action. Do not navigate, click, or perform new browser actions.",
         },
         {
-          icon: "💾",
-          label: "Save as MD",
+          icon: "🧹",
+          label: "Polish",
           prompt:
-            "Save the previous answer as Markdown. Preserve the substance, add clear headings and bullets, and include the source URL when available. Do not navigate, click, or perform new browser actions.",
+            "Polish the previous answer into readable Markdown without changing the substance. Add clear headings and bullets, and include the source URL when available. Do not save files. Do not navigate, click, or perform new browser actions.",
         },
       ];
 }
@@ -128,10 +138,12 @@ export function Chat({
   const [pendingAttachments, setPendingAttachments] = useState<
     ChatAttachment[]
   >([]);
+  const [isDragActive, setIsDragActive] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const copiedTimerRef = useRef<number | null>(null);
+  const dragDepthRef = useRef(0);
 
   const readFileAsText = async (file: File): Promise<string> => {
     return await new Promise((resolve, reject) => {
@@ -271,17 +283,58 @@ export function Chat({
   };
 
   const handleMarkdownLinkClick = async (href: string) => {
-    if (href.startsWith("download-show:")) {
-      const idStr = href.slice("download-show:".length);
-      const downloadId = Number.parseInt(idStr, 10);
-      if (!Number.isFinite(downloadId)) return;
+    const downloadId = getDownloadShowId(href);
+    if (downloadId !== null) {
       chrome.runtime.sendMessage({ type: "show-download", downloadId });
       return;
     }
   };
 
+  const hasDroppedFiles = (event: React.DragEvent) => {
+    return Array.from(event.dataTransfer.types).includes("Files");
+  };
+
+  const handleDragEnter = (event: React.DragEvent) => {
+    if (!hasDroppedFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDragActive(true);
+  };
+
+  const handleDragOver = (event: React.DragEvent) => {
+    if (!hasDroppedFiles(event)) return;
+    event.preventDefault();
+  };
+
+  const handleDragLeave = (event: React.DragEvent) => {
+    if (!hasDroppedFiles(event)) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDragActive(false);
+    }
+  };
+
+  const handleDrop = (event: React.DragEvent) => {
+    if (!hasDroppedFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDragActive(false);
+    void addFiles(event.dataTransfer.files);
+  };
+
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div
+      className="relative flex flex-col flex-1 min-h-0"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragActive && (
+        <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-blue-400 bg-blue-50/90 text-sm font-medium text-blue-900 shadow-inner">
+          {t("dropFilesHere", language)}
+        </div>
+      )}
       {/* Messages Header with Clear Button */}
       {messages.length > 0 && (
         <div className="flex justify-end px-4 pt-2">
@@ -423,7 +476,7 @@ export function Chat({
                 {message.role === "assistant" ? (
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeSanitize]}
+                    rehypePlugins={[[rehypeSanitize, markdownSanitizeSchema]]}
                     components={{
                       a: ({ href, children, ...props }) => {
                         const safeHref = href || "";
@@ -434,6 +487,7 @@ export function Chat({
                               {...props}
                               onClick={(e) => {
                                 e.preventDefault();
+                                e.stopPropagation();
                                 handleMarkdownLinkClick(safeHref);
                               }}
                             >
@@ -502,15 +556,7 @@ export function Chat({
       </div>
 
       {/* Input */}
-      <form
-        onSubmit={handleSubmit}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          void addFiles(e.dataTransfer.files);
-        }}
-        className="p-4 bg-white border-t"
-      >
+      <form onSubmit={handleSubmit} className="p-4 bg-white border-t">
         {pendingAttachments.length > 0 && (
           <div className="mb-3 rounded border border-gray-200 bg-gray-50 p-3">
             <div className="mb-2 text-xs font-medium text-gray-600">

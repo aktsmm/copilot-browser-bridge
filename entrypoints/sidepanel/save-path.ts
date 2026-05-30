@@ -12,8 +12,7 @@ export function normalizeDownloadRelativePath(
     }
 
     if (segment === "..") {
-      segments.pop();
-      continue;
+      return fallbackFilename;
     }
 
     segments.push(segment);

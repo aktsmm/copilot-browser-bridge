@@ -28,12 +28,40 @@ async function main() {
     "src",
     "request-guards.ts",
   );
+  const chromeTypesPath = path.join(
+    chromeDirectory,
+    "entrypoints",
+    "sidepanel",
+    "types.ts",
+  );
+  const chromeSettingsPath = path.join(
+    chromeDirectory,
+    "entrypoints",
+    "sidepanel",
+    "components",
+    "Settings.tsx",
+  );
+  const chromeAutoProviderPath = path.join(
+    chromeDirectory,
+    "entrypoints",
+    "sidepanel",
+    "auto-provider.ts",
+  );
+  const vscodeLlmRouterPath = path.join(
+    vscodeDirectory,
+    "src",
+    "llm-router.ts",
+  );
 
   const chromePackage = JSON.parse(await readTextFile(chromePackagePath));
   const wxtConfigSource = await readTextFile(wxtConfigPath);
   const contentScriptSource = await readTextFile(contentScriptPath);
   const vscodeServerSource = await readTextFile(vscodeServerPath);
   const vscodeRequestGuardsSource = await readTextFile(vscodeRequestGuardsPath);
+  const chromeTypesSource = await readTextFile(chromeTypesPath);
+  const chromeSettingsSource = await readTextFile(chromeSettingsPath);
+  const chromeAutoProviderSource = await readTextFile(chromeAutoProviderPath);
+  const vscodeLlmRouterSource = await readTextFile(vscodeLlmRouterPath);
 
   const expectedVersionFallback = `version: process.env.npm_package_version || "${chromePackage.version}"`;
   if (!wxtConfigSource.includes(expectedVersionFallback)) {
@@ -102,6 +130,52 @@ async function main() {
     failures.push(
       "server.ts must authorize requests through evaluateBridgeRequestGate (trusted client header gate)",
     );
+  }
+
+  const providerIds = [
+    "auto",
+    "copilot",
+    "copilot-agent",
+    "copilot-sdk",
+    "copilot-cli",
+    "lm-studio",
+  ];
+  for (const providerId of providerIds) {
+    const literal = `"${providerId}"`;
+    if (!chromeTypesSource.includes(literal)) {
+      failures.push(`types.ts must include provider ${providerId}`);
+    }
+    if (!vscodeRequestGuardsSource.includes(literal)) {
+      failures.push(`request-guards.ts must include provider ${providerId}`);
+    }
+  }
+
+  const settingsProviders = [
+    "auto",
+    "copilot",
+    "copilot-agent",
+    "copilot-sdk",
+    "copilot-cli",
+    "lm-studio",
+  ];
+  for (const providerId of settingsProviders) {
+    if (!chromeSettingsSource.includes(`provider: "${providerId}"`)) {
+      failures.push(`Settings.tsx must expose provider ${providerId}`);
+    }
+  }
+
+  const textOrder = 'return ["vscode-lm", "copilot-sdk", "copilot-cli"]';
+  const agentOrder = 'return ["copilot-sdk", "vscode-lm", "copilot-cli"]';
+  for (const [fileName, source] of [
+    ["chrome auto-provider.ts", chromeAutoProviderSource],
+    ["vscode llm-router.ts", vscodeLlmRouterSource],
+  ]) {
+    if (!source.includes(textOrder)) {
+      failures.push(`${fileName} must keep Auto text order ${textOrder}`);
+    }
+    if (!source.includes(agentOrder)) {
+      failures.push(`${fileName} must keep Auto agent order ${agentOrder}`);
+    }
   }
 
   if (failures.length > 0) {

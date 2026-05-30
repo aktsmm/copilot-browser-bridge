@@ -4,6 +4,7 @@ import type {
   ModelInfo,
   OperationMode,
   SaveDestinationMode,
+  BridgeCapabilities,
 } from "../types";
 import type { Language } from "../i18n";
 import { t } from "../i18n";
@@ -13,6 +14,11 @@ import {
   normalizeServerPort,
 } from "../server-port";
 import { buildDisplayedCopilotModels } from "../copilot-models";
+import {
+  getAutoProviderLabel,
+  getAutoProviderOrder,
+  getCapabilityStatus,
+} from "../auto-provider";
 
 interface SettingsProps {
   settings: LLMSettings;
@@ -21,6 +27,9 @@ interface SettingsProps {
   isConnected: boolean;
   availableModels: ModelInfo[];
   modelFetchFailed: boolean;
+  bridgeCapabilities: BridgeCapabilities | null;
+  capabilitiesErrorDetail: string | null;
+  onRefreshCapabilities: () => void;
   onRefreshModels: () => void;
   browserActionsEnabled: boolean;
   onBrowserActionsChange: (enabled: boolean) => void;
@@ -48,12 +57,44 @@ const MIN_AGENT_LOOPS = 1;
 const MAX_AGENT_LOOPS = 1000;
 const DEFAULT_AGENT_LOOPS = 500;
 
+function supportsAgentControls(provider: LLMSettings["provider"]): boolean {
+  return (
+    provider === "auto" ||
+    provider === "copilot-agent" ||
+    provider === "copilot-sdk" ||
+    provider === "copilot-cli"
+  );
+}
+
 function normalizeAgentLoops(raw: string): number {
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed)) {
     return DEFAULT_AGENT_LOOPS;
   }
   return Math.min(MAX_AGENT_LOOPS, Math.max(MIN_AGENT_LOOPS, parsed));
+}
+
+export function getBridgeProviderStatusLabel(
+  status: BridgeCapabilities["providers"][number]["status"] | null,
+  language: Language,
+): string {
+  if (language === "ja") {
+    if (status === null) return "未取得";
+    if (status === "available") return "利用可能";
+    if (status === "unavailable") return "利用不可";
+    return "未確認";
+  }
+
+  return status ?? "not checked";
+}
+
+function getBridgeProviderStatusClass(
+  status: BridgeCapabilities["providers"][number]["status"] | null,
+  baseClass: string,
+): string {
+  if (status === "available") return `${baseClass} text-green-700`;
+  if (status === "unavailable") return `${baseClass} text-red-700`;
+  return `${baseClass} text-gray-600`;
 }
 
 export function Settings({
@@ -63,6 +104,9 @@ export function Settings({
   isConnected,
   availableModels,
   modelFetchFailed,
+  bridgeCapabilities,
+  capabilitiesErrorDetail,
+  onRefreshCapabilities,
   onRefreshModels,
   browserActionsEnabled,
   onBrowserActionsChange,
@@ -89,6 +133,11 @@ export function Settings({
     availableModels,
     settings.copilot.model,
   );
+  const usesCopilotModel =
+    settings.provider === "auto" ||
+    settings.provider === "copilot" ||
+    settings.provider === "copilot-agent" ||
+    settings.provider === "copilot-sdk";
 
   const [serverPortInput, setServerPortInput] = React.useState(
     String(serverPort),
@@ -105,6 +154,8 @@ export function Settings({
   };
 
   const isEvaluateActionDisabled = !allowHighRiskActions;
+  const showAgentControls = supportsAgentControls(settings.provider);
+  const autoProviderOrder = getAutoProviderOrder(operationMode);
 
   return (
     <div className="p-4 bg-white border-b max-h-[70vh] overflow-y-auto">
@@ -121,6 +172,27 @@ export function Settings({
           {t("provider", language)}
         </label>
         <div className="flex flex-col gap-2">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="provider"
+              checked={settings.provider === "auto"}
+              onChange={() =>
+                onSettingsChange({ ...settings, provider: "auto" })
+              }
+              className="text-blue-600"
+            />
+            <div>
+              <span>
+                {language === "ja" ? "Auto (推奨)" : "Auto (Recommended)"}
+              </span>
+              <p className="text-xs text-gray-500">
+                {language === "ja"
+                  ? "利用可能な bridge provider を自動選択し、必要に応じて fallback します。"
+                  : "Uses the best available bridge provider and keeps fallback enabled."}
+              </p>
+            </div>
+          </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="radio"
@@ -154,6 +226,44 @@ export function Settings({
             <input
               type="radio"
               name="provider"
+              checked={settings.provider === "copilot-sdk"}
+              onChange={() =>
+                onSettingsChange({ ...settings, provider: "copilot-sdk" })
+              }
+              className="text-blue-600"
+            />
+            <div>
+              <span>GitHub Copilot SDK (Agent)</span>
+              <p className="text-xs text-gray-500">
+                {language === "ja"
+                  ? "Public Preview の SDK 経路です。ツール権限は既定でブロックします。"
+                  : "Public Preview SDK route. Tool permissions are blocked by default."}
+              </p>
+            </div>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="provider"
+              checked={settings.provider === "copilot-cli"}
+              onChange={() =>
+                onSettingsChange({ ...settings, provider: "copilot-cli" })
+              }
+              className="text-blue-600"
+            />
+            <div>
+              <span>GitHub Copilot CLI</span>
+              <p className="text-xs text-gray-500">
+                {language === "ja"
+                  ? "Copilot CLI prompt 経路を直接使用します。"
+                  : "Uses the Copilot CLI prompt route directly."}
+              </p>
+            </div>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="provider"
               checked={settings.provider === "lm-studio"}
               onChange={() =>
                 onSettingsChange({ ...settings, provider: "lm-studio" })
@@ -163,11 +273,115 @@ export function Settings({
             <span>LM Studio</span>
           </label>
         </div>
+        <p className="mt-2 text-xs text-gray-500">
+          {language === "ja"
+            ? "現在の provider はローカル bridge（VS Code 拡張または standalone companion）経由で動作します。SDK / CLI を使う場合も、Chrome 拡張単体ではなくローカル bridge が必要です。"
+            : "All current providers run through a local bridge: either the VS Code extension or the standalone companion. Choosing SDK or CLI still requires a local bridge."}
+        </p>
+      </div>
+
+      {settings.provider === "auto" && (
+        <div className="mb-4 rounded border border-blue-100 bg-blue-50 p-3">
+          <div className="text-sm font-medium text-blue-900">
+            {language === "ja" ? "Auto 経路" : "Auto route"}
+          </div>
+          <p className="mt-1 text-xs text-blue-800">
+            {language === "ja"
+              ? operationMode === "text"
+                ? "テキストモードでは軽量な VS Code LM を先に試します。"
+                : "ブラウザ操作モードでは Copilot SDK を先に試します。"
+              : operationMode === "text"
+                ? "Text mode tries the lightweight VS Code LM path first."
+                : "Browser-agent modes try the Copilot SDK path first."}
+          </p>
+          <ol className="mt-2 flex flex-wrap gap-2 text-xs">
+            {autoProviderOrder.map((providerId, index) => {
+              const status = getCapabilityStatus(
+                bridgeCapabilities,
+                providerId,
+              );
+              return (
+                <li
+                  key={providerId}
+                  className="rounded border border-blue-200 bg-white px-2 py-1 text-blue-900"
+                >
+                  <span className="font-medium">
+                    {index + 1}. {getAutoProviderLabel(providerId)}
+                  </span>
+                  <span
+                    className={getBridgeProviderStatusClass(status, "ml-1")}
+                  >
+                    {getBridgeProviderStatusLabel(status, language)}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      )}
+
+      <div className="mb-4 rounded border border-gray-200 bg-gray-50 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm font-medium text-gray-700">
+            {language === "ja" ? "Bridge 状態" : "Bridge status"}
+          </div>
+          <button
+            type="button"
+            onClick={() => onRefreshCapabilities()}
+            className="text-xs text-blue-600 hover:underline"
+          >
+            {t("refresh", language)}
+          </button>
+        </div>
+        {!isConnected && (
+          <p className="text-xs text-gray-500">
+            {language === "ja"
+              ? "ローカル bridge 未接続です。"
+              : "Local bridge is not connected."}
+          </p>
+        )}
+        {isConnected && capabilitiesErrorDetail && (
+          <p className="text-xs text-amber-700 break-all">
+            {capabilitiesErrorDetail}
+          </p>
+        )}
+        {isConnected && bridgeCapabilities && (
+          <div className="space-y-1">
+            <div className="text-xs text-gray-500">
+              Bridge version: {bridgeCapabilities.version}
+            </div>
+            {bridgeCapabilities.bridge && (
+              <div className="text-xs text-gray-500">
+                Bridge type: {bridgeCapabilities.bridge}
+              </div>
+            )}
+            {bridgeCapabilities.providers.map((provider) => {
+              const statusClass = getBridgeProviderStatusClass(
+                provider.status,
+                "",
+              );
+              return (
+                <div key={provider.id} className="text-xs">
+                  <span className="font-medium text-gray-700">
+                    {provider.name}
+                  </span>{" "}
+                  <span className={statusClass}>
+                    {getBridgeProviderStatusLabel(provider.status, language)}
+                  </span>
+                  {provider.detail && (
+                    <div className="ml-3 text-gray-500 break-words">
+                      {provider.detail}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Copilot Settings */}
-      {(settings.provider === "copilot" ||
-        settings.provider === "copilot-agent") && (
+      {usesCopilotModel && (
         <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
             <label className="block text-sm font-medium text-gray-700">
@@ -423,7 +637,7 @@ export function Settings({
       </div>
 
       {/* Max Agent Loops (only show for agent mode) */}
-      {settings.provider === "copilot-agent" && (
+      {showAgentControls && (
         <div className="mb-4">
           <label
             htmlFor="maxAgentLoops"
@@ -454,7 +668,7 @@ export function Settings({
       )}
 
       {/* Operation Mode (only show for agent mode) */}
-      {settings.provider === "copilot-agent" && (
+      {showAgentControls && (
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-2">
             {language === "ja" ? "操作モード" : "Operation Mode"}

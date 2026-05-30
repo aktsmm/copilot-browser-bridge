@@ -35,12 +35,14 @@ Available now: [Install from Chrome Web Store](https://chromewebstore.google.com
 
 ## Requirements
 
-- **Required (always)**: [GitHub Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode)
+- **Required (always)**: A local bridge server: either [GitHub Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) or the standalone companion in `../standalone-bridge`
 - **LLM provider**: **GitHub Copilot subscription** (only when using Copilot provider) or **Local LLM** (LM Studio, etc.)
+
+> GitHub Copilot SDK and GitHub Copilot CLI providers require a local bridge process. Use the VS Code extension bridge or start the standalone companion; the Chrome Web Store extension alone cannot start local SDK or CLI processes.
 
 ## Usage
 
-1. Launch VS Code extension (auto-start available)
+1. Launch a local bridge: VS Code extension (auto-start available) or `npm run start -- --port 3210 --workspace-root ..\\..` in `standalone-bridge`
 2. Open Chrome extension side panel
 3. Enter questions or operation instructions on any web page
 
@@ -56,21 +58,24 @@ Available now: [Install from Chrome Web Store](https://chromewebstore.google.com
 
 Configure from the side panel settings button:
 
-- **Provider**: GitHub Copilot (Chat) / GitHub Copilot (Agent) / LM Studio
+- **Provider**: Auto / GitHub Copilot (Chat) / GitHub Copilot (Agent) / GitHub Copilot SDK (Agent) / GitHub Copilot CLI / LM Studio
+  - Auto tries VS Code Language Model API → GitHub Copilot SDK → GitHub Copilot CLI for normal chat, and GitHub Copilot SDK → VS Code Language Model API → GitHub Copilot CLI for browser-agent work
+  - The **Auto route** section in Settings shows the provider order and status for the current operation mode
+- **Bridge Status**: Shows the local bridge version and provider availability for VS Code LM, Copilot SDK, Copilot CLI, and LM Studio
 - **Model Selection**: claude-sonnet, gpt-4o, etc.
 - **Browser Actions**: Allow or block automatic browser control from the side panel
 - **File Operations**: Allow or block generated file saves through the bridge
 - **Operation Mode**: Text / Screenshot / Hybrid
-- **Max Loop Count**: Maximum iterations for automation when using GitHub Copilot (Agent)
+- **Max Loop Count**: Maximum automation iterations when using Agent / SDK / CLI / Auto providers
 - **High-Risk Actions / Evaluate**: Optional safety toggles for actions such as `newTab`, `closeTab`, and Playwright `browser_evaluate`; direct `evaluate` actions in the Chrome extension are blocked for security, and Playwright Evaluate is disabled by default
-- **Save Destination**: Save generated markdown either to the browser downloads folder or to a workspace-relative path via the VS Code bridge
+- **Save Destination**: Save generated markdown either to the browser downloads folder or to a workspace-relative path via the local bridge
 - **Default Save Path**: Configure a relative base path such as `output/blog`
 
 ### Save & Attachments
 
 - **Deterministic save buttons**: The latest assistant response can be saved directly as Markdown or as a blog draft with source URL and timestamp metadata
-- **Workspace fallback**: If workspace-relative save is selected but no VS Code workspace is open, the extension falls back to the browser downloads folder
-- **Drag & drop attachments (v1)**: Attach text files and images directly from the chat input area
+- **Workspace fallback**: If workspace-relative save is selected but the local bridge has no workspace root, the extension falls back to the browser downloads folder
+- **Drag & drop attachments (v1)**: Attach text files and images by dropping them onto the chat area or input area
 - **PDF fallback**: PDF files are accepted as attachment context, but text extraction is intentionally skipped in v1
 
 If the extension is connected to VS Code but the model list cannot be loaded, fallback models remain visible and the settings panel shows a warning so you can retry refresh instead of mistaking it for a disconnected state.
@@ -115,7 +120,7 @@ This extension respects user privacy.
 ### Data Collection
 
 - **Personal Information**: Not collected
-- **External Transmission**: Page content is only sent to local VS Code extension (localhost)
+- **External Transmission**: Page content is only sent to the local bridge (localhost)
 - **Data Storage**: Only user settings are stored in local storage
 - **Third Party Sharing**: None
 
@@ -130,7 +135,7 @@ This extension respects user privacy.
 | sidePanel        | Display chat UI                                                 |
 | host_permissions | Limit the placeholder content script to local development pages |
 
-The extension no longer requests broad static site access. It reads the current page through `activeTab` when the user explicitly opens the side panel or triggers the extension, and page content is sent only to the local VS Code bridge on `localhost` and then to the provider selected by the user.
+The extension no longer requests broad static site access. It reads the current page through `activeTab` when the user explicitly opens the side panel or triggers the extension, and page content is sent only to the local bridge on `localhost` and then to the provider selected by the user.
 
 ### LLM Data Transmission
 
@@ -139,7 +144,8 @@ The extension no longer requests broad static site access. It reads the current 
 
 ## Related Projects
 
-- [GitHub Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) - Required VS Code extension
+- [GitHub Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) - VS Code bridge option
+- [Standalone companion bridge](../standalone-bridge/README.md) - Node bridge option without the VS Code extension
 
 ## Author
 

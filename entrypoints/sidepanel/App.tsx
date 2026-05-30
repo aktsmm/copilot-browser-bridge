@@ -8,6 +8,7 @@ import type {
   OperationMode,
   BrowserAction,
   SaveDestinationMode,
+  BridgeCapabilities,
 } from "./types";
 import {
   executeBrowserAction,
@@ -47,9 +48,11 @@ import {
   defaultAllowEvaluateAction,
   resolveAllowEvaluateAction,
 } from "./evaluate-setting-policy";
+import { parseBridgeCapabilities } from "./bridge-capabilities";
+import { formatConnectionFailureDetail } from "./connection-diagnostics";
 
 const DEFAULT_SETTINGS: LLMSettings = {
-  provider: "copilot-agent",
+  provider: "auto",
   copilot: {
     model: "gpt-4o",
   },
@@ -152,6 +155,26 @@ function isOperationMode(value: unknown): value is OperationMode {
   return value === "text" || value === "hybrid" || value === "screenshot";
 }
 
+function usesCopilotModelProvider(provider: LLMSettings["provider"]): boolean {
+  return (
+    provider === "auto" ||
+    provider === "copilot" ||
+    provider === "copilot-agent" ||
+    provider === "copilot-sdk"
+  );
+}
+
+function supportsAutonomousLoopProvider(
+  provider: LLMSettings["provider"],
+): boolean {
+  return (
+    provider === "auto" ||
+    provider === "copilot-agent" ||
+    provider === "copilot-sdk" ||
+    provider === "copilot-cli"
+  );
+}
+
 function isValidLlmSettings(value: unknown): value is LLMSettings {
   if (!value || typeof value !== "object") {
     return false;
@@ -159,8 +182,11 @@ function isValidLlmSettings(value: unknown): value is LLMSettings {
 
   const candidate = value as Partial<LLMSettings>;
   if (
+    candidate.provider !== "auto" &&
     candidate.provider !== "copilot" &&
     candidate.provider !== "copilot-agent" &&
+    candidate.provider !== "copilot-sdk" &&
+    candidate.provider !== "copilot-cli" &&
     candidate.provider !== "lm-studio"
   ) {
     return false;
@@ -193,6 +219,11 @@ export default function App() {
   const [modelFetchErrorDetail, setModelFetchErrorDetail] = useState<
     string | null
   >(null);
+  const [bridgeCapabilities, setBridgeCapabilities] =
+    useState<BridgeCapabilities | null>(null);
+  const [capabilitiesErrorDetail, setCapabilitiesErrorDetail] = useState<
+    string | null
+  >(null);
   const [browserActionsEnabled, setBrowserActionsEnabled] = useState(true);
   const [fileOperationsEnabled, setFileOperationsEnabled] = useState(true);
   const [language, setLanguage] = useState<Language>("ja");
@@ -212,6 +243,7 @@ export default function App() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const inFlightRequestRef = useRef(false);
   const screenshotPermissionWarnedRef = useRef(false);
+  const screenshotFallbackWarnedRef = useRef(false);
   const settingsLoadedRef = useRef(false);
   const pendingPromptDispatchRef = useRef<string | null>(null);
   const pendingPromptTabIdRef = useRef<number | null>(null);
@@ -421,7 +453,7 @@ export default function App() {
 
   const getBridgeBaseUrl = (overridePort?: number) => {
     const targetPort = normalizeServerPort(overridePort ?? serverPort);
-    return `http://localhost:${targetPort}`;
+    return `http://127.0.0.1:${targetPort}`;
   };
 
   const getExtensionOrigin = () => {
@@ -446,22 +478,36 @@ export default function App() {
         setConnectionErrorDetail(null);
         setModelFetchFailed(false);
         void fetchAvailableModels(overridePort);
+        void fetchBridgeCapabilities(overridePort);
       } else {
         setAvailableModels([]);
+        setBridgeCapabilities(null);
+        setCapabilitiesErrorDetail(null);
         setModelFetchFailed(false);
         setModelFetchErrorDetail(null);
         setConnectionErrorDetail(
-          `Health check failed (${response.status} ${response.statusText})`,
+          formatConnectionFailureDetail({
+            port: normalizeServerPort(overridePort ?? serverPort),
+            statusCode: response.status,
+            statusText: response.statusText,
+            language,
+          }),
         );
       }
     } catch (error) {
       console.log("Connection failed:", error);
       setIsConnected(false);
       setAvailableModels([]);
+      setBridgeCapabilities(null);
+      setCapabilitiesErrorDetail(null);
       setModelFetchFailed(false);
       setModelFetchErrorDetail(null);
       setConnectionErrorDetail(
-        error instanceof Error ? error.message : String(error),
+        formatConnectionFailureDetail({
+          port: normalizeServerPort(overridePort ?? serverPort),
+          error: error instanceof Error ? error.message : String(error),
+          language,
+        }),
       );
     } finally {
       clearTimeout(timeout);
@@ -481,10 +527,7 @@ export default function App() {
         setModelFetchFailed(false);
         setModelFetchErrorDetail(null);
         setSettings((currentSettings) => {
-          if (
-            currentSettings.provider !== "copilot" &&
-            currentSettings.provider !== "copilot-agent"
-          ) {
+          if (!usesCopilotModelProvider(currentSettings.provider)) {
             return currentSettings;
           }
 
@@ -518,6 +561,40 @@ export default function App() {
         error instanceof Error ? error.message : String(error),
       );
       console.error("Failed to fetch models");
+    }
+  };
+
+  const fetchBridgeCapabilities = async (overridePort?: number) => {
+    try {
+      const response = await fetch(
+        `${getBridgeBaseUrl(overridePort)}/capabilities`,
+        { headers: BRIDGE_CLIENT_HEADERS },
+      );
+
+      if (!response.ok) {
+        setBridgeCapabilities(null);
+        setCapabilitiesErrorDetail(
+          `Capabilities request failed (${response.status} ${response.statusText})`,
+        );
+        return;
+      }
+
+      const payload = parseBridgeCapabilities(await response.json());
+      if (!payload) {
+        setBridgeCapabilities(null);
+        setCapabilitiesErrorDetail(
+          "Capabilities response had an invalid shape",
+        );
+        return;
+      }
+
+      setBridgeCapabilities(payload);
+      setCapabilitiesErrorDetail(null);
+    } catch (error) {
+      setBridgeCapabilities(null);
+      setCapabilitiesErrorDetail(
+        error instanceof Error ? error.message : String(error),
+      );
     }
   };
 
@@ -1471,7 +1548,7 @@ export default function App() {
 
           // Only continue autonomous loop in agent mode
           // For chat mode, stop after first execution (user can click "つづけて" to continue)
-          if (settings.provider !== "copilot-agent") {
+          if (!supportsAutonomousLoopProvider(settings.provider)) {
             console.log(
               "[Agent] Chat mode - stopping after first action. Use Agent mode for autonomous loop.",
             );
@@ -1507,6 +1584,16 @@ export default function App() {
             } catch (e) {
               console.error("Screenshot fallback failed:", e);
               maybeWarnScreenshotPermission(e);
+              if (!screenshotFallbackWarnedRef.current) {
+                screenshotFallbackWarnedRef.current = true;
+                setMessages((prev: ChatMessage[]) => [
+                  ...prev,
+                  {
+                    role: "assistant",
+                    content: t("screenshotFallbackFailed", language),
+                  },
+                ]);
+              }
               updatedPageContent = await extractPageContent({
                 mode: "interactive",
               });
@@ -1872,6 +1959,11 @@ export default function App() {
           isConnected={isConnected}
           availableModels={availableModels}
           modelFetchFailed={modelFetchFailed}
+          bridgeCapabilities={bridgeCapabilities}
+          capabilitiesErrorDetail={capabilitiesErrorDetail}
+          onRefreshCapabilities={() => {
+            void fetchBridgeCapabilities();
+          }}
           onRefreshModels={() => {
             void fetchAvailableModels();
           }}

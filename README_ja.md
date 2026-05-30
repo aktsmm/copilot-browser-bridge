@@ -35,12 +35,14 @@
 
 ## 📋 必要条件
 
-- **必須（常時）**: [GitHub Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode)（VS Code拡張機能）
+- **必須（常時）**: ローカル bridge server（[GitHub Copilot Browser Bridge for VS Code](https://github.com/aktsmm/copilot-browser-bridge-vscode) または `../standalone-bridge` の standalone companion）
 - **LLMプロバイダー**: **GitHub Copilot サブスクリプション**（Copilotプロバイダーを使う場合のみ）または **ローカルLLM**（LM Studio等）
+
+> GitHub Copilot SDK / GitHub Copilot CLI provider を使う場合は、VS Code bridge または standalone companion のローカル bridge プロセスが必要です。Chrome Web Store 版単体ではローカル SDK / CLI プロセスを起動できません。
 
 ## 🎮 使い方
 
-1. VS Code拡張機能を起動（自動起動設定可）
+1. ローカル bridge を起動（VS Code 拡張の自動起動、または `standalone-bridge` で `npm run start -- --port 3210 --workspace-root ..\\..`）
 2. Chrome拡張機能のサイドパネルを開く
 3. 任意のWebページで質問や操作指示を入力
 
@@ -56,21 +58,24 @@
 
 サイドパネルの設定ボタンから以下を設定可能:
 
-- **プロバイダー**: GitHub Copilot (Chat) / GitHub Copilot (Agent) / LM Studio
+- **プロバイダー**: Auto / GitHub Copilot (Chat) / GitHub Copilot (Agent) / GitHub Copilot SDK (Agent) / GitHub Copilot CLI / LM Studio
+  - Auto は通常チャットでは VS Code Language Model API → GitHub Copilot SDK → GitHub Copilot CLI、ブラウザ操作を伴う Agent 系では GitHub Copilot SDK → VS Code Language Model API → GitHub Copilot CLI の順に試します
+  - 設定画面の **Auto 経路** で、現在の動作モードに応じた provider 順序と状態を確認できます
+- **Bridge 状態**: local bridge version と各 provider（VS Code LM / Copilot SDK / Copilot CLI / LM Studio）の利用状態を確認できます
 - **モデル選択**: claude-sonnet, gpt-4o など
 - **ブラウザ操作**: サイドパネルからの自動ブラウザ操作を許可/無効化できます
 - **ファイル操作**: bridge 経由の生成ファイル保存を許可/無効化できます
 - **動作モード**: テキスト / スクリーンショット / ハイブリッド
-- **最大ループ数**: GitHub Copilot (Agent) 利用時の自動操作の最大繰り返し回数
+- **最大ループ数**: Agent / SDK / CLI / Auto 利用時の自動操作の最大繰り返し回数
 - **高リスク操作 / Evaluate操作の許可**: `newTab` / `closeTab` / Playwright `browser_evaluate` などの安全トグル。Chrome 拡張内の direct `evaluate` はセキュリティ上ブロックされ、Playwright Evaluate は既定で無効です
-- **保存先モード**: 生成した Markdown をブラウザのダウンロードフォルダ、または VS Code workspace 相対パスへ保存できます
+- **保存先モード**: 生成した Markdown をブラウザのダウンロードフォルダ、または bridge の workspace-root 相対パスへ保存できます
 - **既定の相対保存パス**: `output/blog` のような既定 path を設定できます
 
 ### 保存と添付
 
 - **deterministic 保存ボタン**: 最新の assistant 応答をそのまま Markdown またはブログ下書きとして保存できます
 - **workspace fallback**: workspace 相対保存を選んでいても、VS Code で workspace が開いていない場合はブラウザのダウンロードへフォールバックします
-- **D&D 添付 (v1)**: text ファイルと画像をチャット入力へそのままドロップして添付できます
+- **D&D 添付 (v1)**: text ファイルと画像をチャット面または入力欄へそのままドロップして添付できます
 - **PDF fallback**: PDF は添付コンテキストとして受け付けますが、v1 では本文抽出を行いません
 
 VS Code とは接続できているのにモデル一覧の取得に失敗した場合でも、設定パネルに警告を表示したうえでフォールバックモデルを継続表示するため、単なる未接続状態と区別できます。
@@ -137,7 +142,7 @@ CC BY-NC-SA 4.0 © [aktsmm](https://github.com/aktsmm)
 | sidePanel        | チャットUIを表示するため                                         |
 | host_permissions | placeholder の content script をローカル開発ページに限定するため |
 
-広い静的サイトアクセス権限は要求せず、現在のページ読み取りはユーザーが明示的にサイドパネルを開いたり拡張機能を起動したタブに対して `activeTab` 経由で行います。取得したページ内容はまずローカルの VS Code bridge (`localhost`) にのみ送信され、その後はユーザーが選択した LLM プロバイダーへ送られます。
+広い静的サイトアクセス権限は要求せず、現在のページ読み取りはユーザーが明示的にサイドパネルを開いたり拡張機能を起動したタブに対して `activeTab` 経由で行います。取得したページ内容はまずローカル bridge (`localhost`) にのみ送信され、その後はユーザーが選択した LLM プロバイダーへ送られます。
 
 ### LLMへのデータ送信
 

@@ -10,6 +10,8 @@ let preferPlaywright = false;
 let allowEvaluateAction = false;
 const EVALUATE_DISABLED_MESSAGE = "Evaluate action is disabled by default";
 const EVALUATE_DISABLED_MESSAGE_LOWER = EVALUATE_DISABLED_MESSAGE.toLowerCase();
+const MAX_ACTION_TIMEOUT_MS = 60_000;
+const MAX_RAW_PLAYWRIGHT_PARAMS_LENGTH = 10_000;
 
 type BrowserTab = {
   id?: number;
@@ -1369,7 +1371,9 @@ function splitValueAndOptionalTimeout(input: string): {
   if (
     candidateValue.length > 0 &&
     timeoutText.length > 0 &&
-    Number.isFinite(timeout)
+    Number.isSafeInteger(timeout) &&
+    timeout >= 0 &&
+    timeout <= MAX_ACTION_TIMEOUT_MS
   ) {
     return { value: candidateValue, timeout };
   }
@@ -1754,7 +1758,11 @@ function parseAction(type: string, params?: string): BrowserAction | null {
           const params = JSON.parse(paramsStr);
           return { type: "playwright", action, params };
         } catch {
-          return { type: "playwright", action, params: { raw: paramsStr } };
+          const raw =
+            paramsStr.length > MAX_RAW_PLAYWRIGHT_PARAMS_LENGTH
+              ? `${paramsStr.slice(0, MAX_RAW_PLAYWRIGHT_PARAMS_LENGTH)}... [truncated]`
+              : paramsStr;
+          return { type: "playwright", action, params: { raw } };
         }
       }
       return null;

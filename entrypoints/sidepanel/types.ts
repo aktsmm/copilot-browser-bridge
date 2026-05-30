@@ -2,7 +2,13 @@ export type OperationMode = "text" | "hybrid" | "screenshot";
 export type SaveDestinationMode = "browser-downloads" | "workspace-relative";
 
 export interface LLMSettings {
-  provider: "copilot" | "copilot-agent" | "lm-studio";
+  provider:
+    | "auto"
+    | "copilot"
+    | "copilot-agent"
+    | "copilot-sdk"
+    | "copilot-cli"
+    | "lm-studio";
   copilot: {
     model: string;
   };
@@ -30,6 +36,24 @@ export interface ModelInfo {
   provider: string;
   id: string;
   name: string;
+}
+
+export interface BridgeProviderCapability {
+  id: "vscode-lm" | "copilot-sdk" | "copilot-cli" | "lm-studio";
+  name: string;
+  status: "available" | "unavailable" | "unknown";
+  detail?: string;
+  models?: ModelInfo[];
+}
+
+export interface BridgeCapabilities {
+  version: string;
+  bridge?: "vscode" | "standalone";
+  providers: BridgeProviderCapability[];
+  recommended: {
+    chat: string;
+    agent: string;
+  };
 }
 
 // Browser Action Types (Playwright MCP compatible)

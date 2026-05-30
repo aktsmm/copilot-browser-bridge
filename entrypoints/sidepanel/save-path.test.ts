@@ -17,10 +17,16 @@ describe("normalizeDownloadRelativePath", () => {
     );
   });
 
-  it("removes leading slashes and traversal segments", () => {
-    expect(normalizeDownloadRelativePath("/../output/./blog/../post.md")).toBe(
-      "output/post.md",
+  it("removes leading slashes and keeps safe nested segments", () => {
+    expect(normalizeDownloadRelativePath("/output/./blog/post.md")).toBe(
+      "output/blog/post.md",
     );
+  });
+
+  it("falls back instead of normalizing parent traversal", () => {
+    expect(
+      normalizeDownloadRelativePath("/../output/./blog/../post.md", "safe.md"),
+    ).toBe("safe.md");
   });
 
   it("falls back when the path becomes empty", () => {
